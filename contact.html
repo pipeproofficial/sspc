@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact | SSPC Office</title>
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="icon" href="logo.png" type="image/png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SSPC">
+    <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="industrial-theme page-shell">
+    <!-- Page Loader -->
+    <div id="pageLoader" class="page-loader">
+        <div class="loader-content">
+            <div class="loader-box">
+                <div class="spinner-ring ring-outer"></div>
+                <div class="spinner-ring ring-inner"></div>
+                <img src="logo.png" class="center-icon" alt="Logo" style="width: 46px; height: 46px; object-fit: contain;">
+            </div>
+            <h5 class="mt-3 fw-bold text-dark">SSPC</h5>
+            <p class="text-muted small">Loading...</p>
+        </div>
+    </div>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg fixed-top navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="index.html">
+                <img src="logo.png" alt="Logo" class="navbar-logo" width="40" height="40">
+                <span class="fw-bold d-none d-lg-inline">Sree Srinivasa Pipe Company</span>
+                <span class="fw-bold d-inline d-lg-none">SSPC</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a class="nav-link" href="about.html">About</a></li>
+                    <li class="nav-item"><a class="nav-link" href="products.html">Products</a></li>
+                    <li class="nav-item"><a class="nav-link active" href="contact.html">Contact</a></li>
+                    <li class="nav-item">
+                        <button class="btn btn-nav ms-2 theme-toggle" id="themeToggle" type="button" title="Toggle theme" aria-label="Toggle theme">
+                            <span class="toggle-track" aria-hidden="true">
+                                <span class="toggle-knob">
+                                    <span class="knob-icon sun"><i class="fas fa-sun"></i></span>
+                                    <span class="knob-icon moon"><i class="fas fa-moon"></i></span>
+                                </span>
+                            </span>
+                        </button>
+                    </li>
+                    <li class="nav-item"><a class="btn btn-gold-outline btn-nav ms-2" href="login.html?mode=gate">Login</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero-industrial">
+        <div class="hero-overlay"></div>
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-lg-7 text-white reveal">
+                    <div class="hero-badges">
+                        <span class="hero-badge"><i class="fas fa-phone me-1"></i>Office & Sales</span>
+                        <span class="hero-badge"><i class="fas fa-clock me-1"></i>Mon-Sat 9AM-6PM</span>
+                        <span class="hero-badge"><i class="fas fa-truck me-1"></i>Dispatch Support</span>
+                    </div>
+                    <h1 class="display-4 fw-bold mb-4">Contact & Inquiry</h1>
+                    <p class="lead mb-4">Reach out for bulk orders, project-based supply, or delivery coordination.</p>
+                    <a href="#contact-form" class="btn btn-primary btn-lg px-4">
+                        Send Inquiry
+                    </a>
+                </div>
+                <div class="col-lg-5">
+                    <div class="hero-side-card reveal reveal-delay-1">
+                        <h5 class="mb-3">Get a Response Fast</h5>
+                        <ul class="list-unstyled mb-0">
+                            <li><i class="fas fa-check-circle me-2"></i>Quote turnaround</li>
+                            <li><i class="fas fa-check-circle me-2"></i>Project dispatch planning</li>
+                            <li><i class="fas fa-check-circle me-2"></i>On-site delivery support</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section class="py-5 reveal" id="contact-form">
+        <div class="container">
+            <div class="row g-4">
+                <div class="col-lg-5">
+                    <h2 class="display-6 fw-bold text-gold">Reach the Office</h2>
+                    <p class="text-silver">For quotations, production schedules, and dispatch planning, contact SSPC directly.</p>
+                    <div class="card feature-card mt-4">
+                        <div class="card-body p-4">
+                            <div class="text-silver mb-3">
+                                <i class="fas fa-envelope me-2 text-gold"></i>
+                                <a href="mailto:mnrdeveloper11@gmail.com" id="contactOfficeEmailLink" class="text-silver text-decoration-none">
+                                    <span id="contactOfficeEmailText">mnrdeveloper11@gmail.com</span>
+                                </a>
+                            </div>
+                            <div class="text-silver mb-3">
+                                <i class="fas fa-phone me-2 text-gold"></i>
+                                <a href="tel:+917416006394" id="contactOfficePhoneLink" class="text-silver text-decoration-none">
+                                    <span id="contactOfficePhoneText">+91 74160 06394</span>
+                                </a>
+                            </div>
+                            <div class="text-silver"><i class="fas fa-location-dot me-2 text-gold"></i><span id="contactOfficeAddressText">SSPC Main Office, Telangana</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-7">
+                    <div class="card feature-card">
+                        <div class="card-body p-4">
+                            <h5 class="text-gold mb-3">Send an Inquiry</h5>
+                            <form id="contactForm" action="https://formspree.io/f/xbdaryjb" method="POST">
+                                <div id="contactAlert" class="alert d-none" role="alert"></div>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <div class="form-floating">
+                                            <input type="text" class="form-control" id="contactName" name="name" placeholder="Your Name" required>
+                                            <label for="contactName">Full Name</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-floating">
+                                            <input type="email" class="form-control" id="contactEmail" name="email" placeholder="name@example.com" required>
+                                            <label for="contactEmail">Email Address</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="form-floating">
+                                            <input type="text" class="form-control" id="contactSubject" name="subject" placeholder="Subject" required>
+                                            <label for="contactSubject">Subject</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="form-floating">
+                                            <textarea class="form-control" id="contactMessage" name="message" placeholder="Your message" style="height: 160px" required></textarea>
+                                            <label for="contactMessage">Message</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-hero-primary btn-lg mt-4" id="contactSubmit">
+                                    <span class="spinner-border spinner-border-sm d-none me-2" role="status" aria-hidden="true"></span>
+                                    <i class="fas fa-paper-plane me-2"></i>Send Message
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Full Width Map -->
+    <section class="map-section">
+        <div class="container-fluid px-0">
+            <iframe title="SSPC Location" src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2616.931156103798!2d78.33135084851398!3d18.852205932648225!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bcd95628d43edb7%3A0x81545c65f3cc4ecc!2sSREE%20SRINIVASA%20PIPE%20CO.!5e1!3m2!1sen!2sin!4v1770735534122!5m2!1sen!2sin" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer industrial-footer">
+        <div class="container">
+            <div class="footer-cta">
+                <div>
+                    <h4>Planning a New Project?</h4>
+                    <p>Get product recommendations, quantity planning, and dispatch support from SSPC.</p>
+                </div>
+                <a href="tel:+917416006394" class="btn btn-light" id="contactFooterCallSalesLink">Call Sales</a>
+            </div>
+            <div class="row footer-top g-4">
+                <div class="col-md-5">
+                    <div class="footer-brand">
+                        <img src="logo.png" alt="SSPC Logo">
+                        <div>
+                            <div class="footer-title" id="contactFooterCompanyName">SSPC</div>
+                            <div class="text-silver opacity-75 small">Pipe Manufacturing</div>
+                        </div>
+                    </div>
+                    <p class="text-silver opacity-75 mb-0">Industrial-grade RCC, water tanks, and septic pipe manufacturing with reliable quality and dispatch support.</p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="fw-bold mb-3 text-gold">Quick Links</h6>
+                    <div class="footer-links">
+                        <a href="index.html" class="hover-gold">Home</a>
+                        <a href="about.html" class="hover-gold">About</a>
+                        <a href="products.html" class="hover-gold">Products</a>
+                        <a href="contact.html" class="hover-gold">Contact</a>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <h6 class="fw-bold mb-3 text-gold">Contact</h6>
+                    <div class="footer-contact">
+                        <a href="mailto:mnrdeveloper11@gmail.com" class="footer-contact-item" id="contactFooterEmailLink">
+                            <i class="fas fa-envelope"></i>
+                            <span id="contactFooterEmailText">mnrdeveloper11@gmail.com</span>
+                        </a>
+                        <a href="tel:+917416006394" class="footer-contact-item" id="contactFooterPhoneLink">
+                            <i class="fas fa-phone"></i>
+                            <span id="contactFooterPhoneText">+91 74160 06394</span>
+                        </a>
+                        <span class="footer-contact-item">
+                            <i class="fas fa-clock"></i>
+                            <span>Mon-Sat, 9AM-6PM</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <div>&copy; 2026 SSPC. All rights reserved.</div>
+                <div class="footer-legal">
+                    <a class="text-silver opacity-75 hover-gold" href="privacy.html">Privacy</a>
+                    <a class="text-silver opacity-75 hover-gold" href="terms.html">Terms</a>
+                    <a class="text-silver opacity-75 hover-gold" href="support.html">Support</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-remote-config-compat.js"></script>
+    <script type="module" src="js/firebase-config.js"></script>
+    <script type="module" src="js/contact.js"></script>
+
+    <script>
+        (function () {
+            const root = document.documentElement;
+            const toggleBtn = document.getElementById('themeToggle');
+            const stored = localStorage.getItem('sspcTheme');
+            if (stored === 'dark') {
+                root.classList.add('theme-dark');
+            }
+
+            const syncIcon = () => {
+                if (!toggleBtn) return;
+                const isDark = root.classList.contains('theme-dark');
+                toggleBtn.classList.toggle('is-dark', isDark);
+                toggleBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+                toggleBtn.setAttribute('title', isDark ? 'Switch to light theme' : 'Switch to dark theme');
+            };
+
+            syncIcon();
+
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    root.classList.toggle('theme-dark');
+                    localStorage.setItem('sspcTheme', root.classList.contains('theme-dark') ? 'dark' : 'light');
+                    syncIcon();
+                });
+            }
+        })();
+    </script>
+    <script>
+        (function () {
+            const loader = document.getElementById('pageLoader');
+            const body = document.body;
+
+            const hideLoader = () => {
+                if (body) body.classList.add('page-ready');
+                if (!loader) return;
+                loader.classList.add('is-hidden');
+                setTimeout(() => loader.remove(), 400);
+            };
+
+            window.addEventListener('load', hideLoader);
+            window.addEventListener('pageshow', hideLoader);
+
+            document.addEventListener('click', (e) => {
+                const link = e.target.closest('a');
+                if (!link) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                const href = link.getAttribute('href') || '';
+                if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || link.target === '_blank') return;
+                if (link.hasAttribute('download')) return;
+                const sameOrigin = link.origin === window.location.origin;
+                if (!sameOrigin) return;
+                e.preventDefault();
+                if (body) body.classList.add('page-leaving');
+                if (loader) loader.classList.remove('is-hidden');
+                window.setTimeout(() => {
+                    window.location.href = link.href;
+                }, 170);
+            });
+        })();
+    </script>
+    <script src="js/input-case.js"></script>
+    <script src="js/pwa.js"></script>
+</body>
+</html>
+
+
+
+

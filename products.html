@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Products | SSPC</title>
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="icon" href="logo.png" type="image/png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SSPC">
+    <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="industrial-theme page-shell">
+    <!-- Page Loader -->
+    <div id="pageLoader" class="page-loader">
+        <div class="loader-content">
+            <div class="loader-box">
+                <div class="spinner-ring ring-outer"></div>
+                <div class="spinner-ring ring-inner"></div>
+                <img src="logo.png" class="center-icon" alt="Logo" style="width: 46px; height: 46px; object-fit: contain;">
+            </div>
+            <h5 class="mt-3 fw-bold text-dark">SSPC</h5>
+            <p class="text-muted small">Loading...</p>
+        </div>
+    </div>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg fixed-top navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="index.html">
+                <img src="logo.png" alt="Logo" class="navbar-logo" width="40" height="40">
+                <span class="fw-bold d-none d-lg-inline">Sree Srinivasa Pipe Company</span>
+                <span class="fw-bold d-inline d-lg-none">SSPC</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a class="nav-link" href="about.html">About</a></li>
+                    <li class="nav-item"><a class="nav-link active" href="products.html">Products</a></li>
+                    <li class="nav-item"><a class="nav-link" href="contact.html">Contact</a></li>
+                    <li class="nav-item">
+                        <button class="btn btn-nav ms-2 theme-toggle" id="themeToggle" type="button" title="Toggle theme" aria-label="Toggle theme">
+                            <span class="toggle-track" aria-hidden="true">
+                                <span class="toggle-knob">
+                                    <span class="knob-icon sun"><i class="fas fa-sun"></i></span>
+                                    <span class="knob-icon moon"><i class="fas fa-moon"></i></span>
+                                </span>
+                            </span>
+                        </button>
+                    </li>
+                    <li class="nav-item"><a class="btn btn-gold-outline btn-nav ms-2" href="login.html?mode=gate">Login</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero-industrial">
+        <div class="hero-overlay"></div>
+        <div class="container position-relative">
+            <div class="row align-items-center">
+                <div class="col-lg-7 text-white reveal">
+                    <div class="hero-badges">
+                        <span class="hero-badge"><i class="fas fa-layer-group me-1"></i>Ready Stock</span>
+                        <span class="hero-badge"><i class="fas fa-warehouse me-1"></i>Bulk Supply</span>
+                        <span class="hero-badge"><i class="fas fa-ruler-combined me-1"></i>Custom Sizes</span>
+                    </div>
+                    <h1 class="display-4 fw-bold mb-3">Products & Availability</h1>
+                    <p class="lead mb-4">Browse SSPC product categories and live stock pulled from the owner-side inventory list.</p>
+                </div>
+                <div class="col-lg-5">
+                    <div class="hero-side-card reveal reveal-delay-1">
+                        <h5 class="mb-3">Quick Actions</h5>
+                        <ul class="list-unstyled mb-0">
+                            <li><i class="fas fa-check-circle me-2"></i>Call for bulk pricing</li>
+                            <li><i class="fas fa-check-circle me-2"></i>WhatsApp for availability</li>
+                            <li><i class="fas fa-check-circle me-2"></i>Custom sizing support</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Products -->
+    <section class="section-block">
+        <div class="container">
+            <div class="products-toolbar">
+                <h2 class="section-title mb-0">Product Categories</h2>
+                <div class="category-tabs" id="productCategoryTabs"></div>
+            </div>
+            <div class="row g-4 mt-2" id="productsGrid">
+                <div class="col-12 text-center text-muted">Loading products...</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer industrial-footer">
+        <div class="container">
+            <div class="footer-cta">
+                <div>
+                    <h4>Planning a New Project?</h4>
+                    <p>Get product recommendations, quantity planning, and dispatch support from SSPC.</p>
+                </div>
+                <a href="contact.html" class="btn btn-light" id="productsTalkToSalesLink">Talk to Sales</a>
+            </div>
+            <div class="row footer-top g-4">
+                <div class="col-md-5">
+                    <div class="footer-brand">
+                        <img src="logo.png" alt="SSPC Logo">
+                        <div>
+                            <div class="footer-title" id="productsFooterCompanyName">SSPC</div>
+                            <div class="text-silver opacity-75 small">Pipe Manufacturing</div>
+                        </div>
+                    </div>
+                    <p class="text-silver opacity-75 mb-0">Industrial-grade RCC, water tanks, and septic pipe manufacturing with reliable quality and dispatch support.</p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="fw-bold mb-3 text-gold">Quick Links</h6>
+                    <div class="footer-links">
+                        <a href="index.html" class="hover-gold">Home</a>
+                        <a href="about.html" class="hover-gold">About</a>
+                        <a href="products.html" class="hover-gold">Products</a>
+                        <a href="contact.html" class="hover-gold">Contact</a>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <h6 class="fw-bold mb-3 text-gold">Contact</h6>
+                    <div class="footer-contact">
+                        <a href="mailto:mnrdeveloper11@gmail.com" class="footer-contact-item" id="productsFooterEmailLink">
+                            <i class="fas fa-envelope"></i>
+                            <span id="productsFooterEmailText">mnrdeveloper11@gmail.com</span>
+                        </a>
+                        <a href="tel:+917416006394" class="footer-contact-item" id="productsFooterPhoneLink">
+                            <i class="fas fa-phone"></i>
+                            <span id="productsFooterPhoneText">+91 74160 06394</span>
+                        </a>
+                        <span class="footer-contact-item">
+                            <i class="fas fa-clock"></i>
+                            <span>Mon-Sat, 9AM-6PM</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <div>&copy; 2026 SSPC. All rights reserved.</div>
+                <div class="footer-legal">
+                    <a class="text-silver opacity-75 hover-gold" href="privacy.html">Privacy</a>
+                    <a class="text-silver opacity-75 hover-gold" href="terms.html">Terms</a>
+                    <a class="text-silver opacity-75 hover-gold" href="support.html">Support</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-remote-config-compat.js"></script>
+    <script type="module" src="js/firebase-config.js"></script>
+    <script type="module" src="js/products.js"></script>
+    <script>
+        (function () {
+            const root = document.documentElement;
+            const toggleBtn = document.getElementById('themeToggle');
+            const stored = localStorage.getItem('sspcTheme');
+            if (stored === 'dark') {
+                root.classList.add('theme-dark');
+            }
+
+            const syncIcon = () => {
+                if (!toggleBtn) return;
+                const isDark = root.classList.contains('theme-dark');
+                toggleBtn.classList.toggle('is-dark', isDark);
+                toggleBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+                toggleBtn.setAttribute('title', isDark ? 'Switch to light theme' : 'Switch to dark theme');
+            };
+
+            syncIcon();
+
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    root.classList.toggle('theme-dark');
+                    localStorage.setItem('sspcTheme', root.classList.contains('theme-dark') ? 'dark' : 'light');
+                    syncIcon();
+                });
+            }
+        })();
+    </script>
+    <script>
+        (function () {
+            const loader = document.getElementById('pageLoader');
+            const body = document.body;
+
+            const hideLoader = () => {
+                if (body) body.classList.add('page-ready');
+                if (!loader) return;
+                loader.classList.add('is-hidden');
+                setTimeout(() => loader.remove(), 400);
+            };
+
+            window.addEventListener('load', hideLoader);
+            window.addEventListener('pageshow', hideLoader);
+
+            document.addEventListener('click', (e) => {
+                const link = e.target.closest('a');
+                if (!link) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                const href = link.getAttribute('href') || '';
+                if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || link.target === '_blank') return;
+                if (link.hasAttribute('download')) return;
+                const sameOrigin = link.origin === window.location.origin;
+                if (!sameOrigin) return;
+                e.preventDefault();
+                if (body) body.classList.add('page-leaving');
+                if (loader) loader.classList.remove('is-hidden');
+                window.setTimeout(() => {
+                    window.location.href = link.href;
+                }, 170);
+            });
+        })();
+    </script>
+    <script src="js/input-case.js"></script>
+    <script src="js/pwa.js"></script>
+</body>
+</html>
+
+
+
+

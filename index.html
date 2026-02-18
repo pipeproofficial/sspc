@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSPC | Business Operations Hub</title>
+    <script>
+        (function () {
+            try {
+                const stored = localStorage.getItem('sspcTheme');
+                if (stored === 'dark') {
+                    document.documentElement.classList.add('theme-dark');
+                }
+            } catch (e) {
+                // no-op
+            }
+        })();
+    </script>
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="icon" href="logo.png" type="image/png">
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SSPC">
+    <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/auth.css">
+</head>
+<body class="industrial-theme page-shell">
+    <!-- Page Loader -->
+    <div id="pageLoader" class="page-loader">
+        <div class="loader-content">
+            <div class="loader-box">
+                <div class="spinner-ring ring-outer"></div>
+                <div class="spinner-ring ring-inner"></div>
+                <img src="logo.png" class="center-icon" alt="Logo" style="width: 46px; height: 46px; object-fit: contain;">
+            </div>
+            <h5 class="mt-3 fw-bold text-dark">SSPC</h5>
+            <p class="text-muted small">Loading...</p>
+        </div>
+    </div>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg fixed-top navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <img src="logo.png" alt="Logo" class="navbar-logo" width="40" height="40">
+                <span class="fw-bold d-none d-lg-inline">Sree Srinivasa Pipe Company</span>
+                <span class="fw-bold d-inline d-lg-none">SSPC</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a class="nav-link" href="about.html">About</a></li>
+                    <li class="nav-item"><a class="nav-link" href="products.html">Products</a></li>
+                    <li class="nav-item"><a class="nav-link" href="contact.html">Contact</a></li>
+                    <li class="nav-item">
+                        <button class="btn btn-nav ms-2 theme-toggle" id="themeToggle" type="button" title="Toggle theme" aria-label="Toggle theme">
+                            <span class="toggle-track" aria-hidden="true">
+                                <span class="toggle-knob">
+                                    <span class="knob-icon sun"><i class="fas fa-sun"></i></span>
+                                    <span class="knob-icon moon"><i class="fas fa-moon"></i></span>
+                                </span>
+                            </span>
+                        </button>
+                    </li>
+                    <li class="nav-item" id="authNavItem"><a class="btn btn-gold-outline btn-nav ms-2" id="authNavBtn" href="login.html?mode=gate">Login</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero-industrial" id="home">
+        <div class="hero-overlay"></div>
+        <div class="container position-relative">
+            <div class="row align-items-center">
+                <div class="col-lg-7 text-white">
+                    <div class="hero-badges">
+                        <span class="hero-badge"><i class="fas fa-industry me-1"></i>Industrial Manufacturing</span>
+                        <span class="hero-badge"><i class="fas fa-shield-alt me-1"></i>ISO-Grade Quality</span>
+                        <span class="hero-badge"><i class="fas fa-truck me-1"></i>On-Time Dispatch</span>
+                    </div>
+                    <h1 class="display-3 fw-bold mb-4">Sree Srinivasa Pipe Company</h1>
+                    <p class="lead mb-4">We manufacture RCC, water tanks, and septic tank pipes engineered for infrastructure and municipal projects. Built for strength, delivered with confidence.</p>
+                    <a href="#contact" class="btn btn-primary btn-lg px-4">
+                        Request Quote
+                    </a>
+                    <div class="row g-3 mt-4 hero-highlights">
+                        <div class="col-md-4">
+                            <div class="highlight-card">
+                                <div class="highlight-value">20+ Years</div>
+                                <div class="highlight-label">Industry Experience</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="highlight-card">
+                                <div class="highlight-value">500+ MT</div>
+                                <div class="highlight-label">Monthly Capacity</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="highlight-card">
+                                <div class="highlight-value">QC Tested</div>
+                                <div class="highlight-label">ISO Standards</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-5">
+                    <div class="hero-side-card">
+                        <h5 class="mb-3">Trusted Large-Scale Supplier</h5>
+                        <ul class="list-unstyled mb-0">
+                            <li><i class="fas fa-check-circle me-2"></i>Custom sizes & molds</li>
+                            <li><i class="fas fa-check-circle me-2"></i>Bulk orders handled fast</li>
+                            <li><i class="fas fa-check-circle me-2"></i>Fleet-ready dispatch</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Teaser -->
+    <section class="section-block">
+        <div class="container">
+            <div class="row align-items-center g-4">
+                <div class="col-lg-6">
+                    <h2 class="section-title">About <span id="aboutCompanyName">SSPC</span></h2>
+                    <p class="section-lead">SSPC is a large-scale pipe manufacturing facility specializing in RCC, water tanks, and septic tank solutions.</p>
+                    <p class="text-muted">Our infrastructure supports high-volume production with consistent quality, durable performance, and on-time delivery.</p>
+                    <div class="d-flex flex-column gap-2 mb-2">
+                        <a class="text-decoration-none" id="aboutPhoneLink" href="tel:+917416006394">
+                            <i class="fas fa-phone me-2"></i><span id="aboutPhoneText">+91 74160 06394</span>
+                        </a>
+                        <a class="text-decoration-none" id="aboutEmailLink" href="mailto:mnrdeveloper11@gmail.com">
+                            <i class="fas fa-envelope me-2"></i><span id="aboutEmailText">mnrdeveloper11@gmail.com</span>
+                        </a>
+                    </div>
+                    <a href="about.html" class="btn btn-outline-primary mt-2">Learn More</a>
+                </div>
+                <div class="col-lg-6">
+                    <div class="image-frame">
+                        <img src="factory-hero.png" alt="SSPC Factory" class="img-fluid rounded">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Products Teaser -->
+    <section class="section-block section-muted">
+        <div class="container">
+            <div class="mb-4">
+                <div>
+                    <h2 class="section-title mb-1">Featured Products</h2>
+                    <p class="section-lead mb-0">Explore a quick preview of available products from SSPC.</p>
+                </div>
+            </div>
+            <div class="row g-4" id="landingStockGrid">
+                <div class="col-12 text-center text-muted">Loading products...</div>
+            </div>
+            <div class="text-center mt-4">
+                <a href="products.html" class="btn btn-outline-primary">View More Products</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Full Width Map -->
+    <section class="map-section">
+        <div class="container-fluid px-0">
+            <iframe title="SSPC Location" src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2616.931156103798!2d78.33135084851398!3d18.852205932648225!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bcd95628d43edb7%3A0x81545c65f3cc4ecc!2sSREE%20SRINIVASA%20PIPE%20CO.!5e1!3m2!1sen!2sin!4v1770735534122!5m2!1sen!2sin" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer industrial-footer">
+        <div class="container">
+            <div class="footer-cta">
+                <div>
+                    <h4>Planning a New Project?</h4>
+                    <p>Get product recommendations, quantity planning, and dispatch support from SSPC.</p>
+                </div>
+                <a href="contact.html" class="btn btn-light">Talk to Sales</a>
+            </div>
+            <div class="row footer-top g-4">
+                <div class="col-md-5">
+                    <div class="footer-brand">
+                        <img src="logo.png" alt="SSPC Logo">
+                        <div>
+                            <div class="footer-title" id="footerCompanyName">SSPC</div>
+                            <div class="text-silver opacity-75 small">Pipe Manufacturing</div>
+                        </div>
+                    </div>
+                    <p class="text-silver opacity-75 mb-0">Industrial-grade RCC, water tanks, and septic pipe manufacturing with reliable quality and dispatch support.</p>
+                </div>
+                <div class="col-md-3">
+                    <h6 class="fw-bold mb-3 text-gold">Quick Links</h6>
+                    <div class="footer-links">
+                        <a href="index.html" class="hover-gold">Home</a>
+                        <a href="about.html" class="hover-gold">About</a>
+                        <a href="products.html" class="hover-gold">Products</a>
+                        <a href="contact.html" class="hover-gold">Contact</a>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <h6 class="fw-bold mb-3 text-gold">Contact</h6>
+                    <div class="footer-contact">
+                        <a href="mailto:mnrdeveloper11@gmail.com" class="footer-contact-item" id="footerEmailLink">
+                            <i class="fas fa-envelope"></i>
+                            <span id="footerEmailText">mnrdeveloper11@gmail.com</span>
+                        </a>
+                        <a href="tel:+917416006394" class="footer-contact-item" id="footerPhoneLink">
+                            <i class="fas fa-phone"></i>
+                            <span id="footerPhoneText">+91 74160 06394</span>
+                        </a>
+                        <span class="footer-contact-item">
+                            <i class="fas fa-clock"></i>
+                            <span>Mon-Sat, 9AM-6PM</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <div>&copy; 2026 SSPC. All rights reserved.</div>
+                <div class="footer-legal">
+                    <a class="text-silver opacity-75 hover-gold" href="privacy.html">Privacy</a>
+                    <a class="text-silver opacity-75 hover-gold" href="terms.html">Terms</a>
+                    <a class="text-silver opacity-75 hover-gold" href="support.html">Support</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        (function () {
+            const root = document.documentElement;
+            const toggleBtn = document.getElementById('themeToggle');
+            const stored = localStorage.getItem('sspcTheme');
+            if (stored === 'dark') {
+                root.classList.add('theme-dark');
+            }
+
+            const syncIcon = () => {
+                if (!toggleBtn) return;
+                const isDark = root.classList.contains('theme-dark');
+                toggleBtn.classList.toggle('is-dark', isDark);
+                toggleBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+                toggleBtn.setAttribute('title', isDark ? 'Switch to light theme' : 'Switch to dark theme');
+            };
+
+            syncIcon();
+
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    root.classList.toggle('theme-dark');
+                    localStorage.setItem('sspcTheme', root.classList.contains('theme-dark') ? 'dark' : 'light');
+                    syncIcon();
+                });
+            }
+        })();
+    </script>
+    <script>
+        (function () {
+            const loader = document.getElementById('pageLoader');
+            const body = document.body;
+
+            const hideLoader = () => {
+                if (body) body.classList.add('page-ready');
+                if (!loader) return;
+                loader.classList.add('is-hidden');
+                setTimeout(() => loader.remove(), 400);
+            };
+
+            window.addEventListener('load', hideLoader);
+            window.addEventListener('pageshow', hideLoader);
+
+            document.addEventListener('click', (e) => {
+                const link = e.target.closest('a');
+                if (!link) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                const href = link.getAttribute('href') || '';
+                if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || link.target === '_blank') return;
+                if (link.hasAttribute('download')) return;
+                const sameOrigin = link.origin === window.location.origin;
+                if (!sameOrigin) return;
+                e.preventDefault();
+                if (body) body.classList.add('page-leaving');
+                if (loader) loader.classList.remove('is-hidden');
+                window.setTimeout(() => {
+                    window.location.href = link.href;
+                }, 170);
+            });
+        })();
+    </script>
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-remote-config-compat.js"></script>
+    <script>
+        (function () {
+            const authNavBtn = document.getElementById('authNavBtn');
+            if (!authNavBtn) return;
+
+            const setAuthNav = (isLoggedIn) => {
+                if (isLoggedIn) {
+                    authNavBtn.href = 'dashboard.html';
+                    authNavBtn.innerHTML = '<i class="fas fa-user me-2"></i>Dashboard';
+                    authNavBtn.setAttribute('aria-label', 'Go to dashboard');
+                } else {
+                    authNavBtn.href = 'login.html?mode=gate';
+                    authNavBtn.textContent = 'Login';
+                    authNavBtn.setAttribute('aria-label', 'Login');
+                }
+            };
+
+            // Fast initial render from local session.
+            setAuthNav(Boolean(localStorage.getItem('user')));
+
+            const bindFirebaseAuth = () => {
+                if (!window.firebase || !firebase.auth || !firebase.apps || !firebase.apps.length) return false;
+                firebase.auth().onAuthStateChanged((user) => setAuthNav(Boolean(user)));
+                return true;
+            };
+
+            if (bindFirebaseAuth()) return;
+
+            let attempts = 0;
+            const timer = setInterval(() => {
+                attempts += 1;
+                if (bindFirebaseAuth() || attempts > 30) {
+                    clearInterval(timer);
+                }
+            }, 100);
+        })();
+    </script>
+    <script type="module" src="js/firebase-config.js"></script>
+    <script type="module" src="js/landing-stock.js"></script>
+    <script type="module" src="js/auth.js"></script>
+    <script src="js/input-case.js"></script>
+    <script src="js/pwa.js"></script>
+</body>
+</html>
+
+
+
+
+
