@@ -16,12 +16,30 @@ function sanitizePhone(value) {
     return String(value).replace(/[^\d]/g, '');
 }
 
-function applyLandingBusinessInfo(publicData = {}) {
-    const companyName = String(publicData.companyName || publicData.businessName || 'SSPC').trim() || 'SSPC';
-    const rawPhone = String(publicData.phone || publicData.companyPhone || '').trim();
+function resolveBusinessContacts(publicData = {}) {
+    const rawPhone = String(
+        publicData.phone
+        || publicData.companyPhone
+        || publicData.mobile
+        || publicData.phoneNumber
+        || ''
+    ).trim();
     const phoneDigits = sanitizePhone(rawPhone);
     const displayPhone = rawPhone || (phoneDigits ? `+${phoneDigits}` : '');
     const email = String(publicData.email || publicData.companyEmail || '').trim();
+    const rawWhatsapp = String(
+        publicData.whatsapp
+        || publicData.companyWhatsapp
+        || publicData.whatsappNumber
+        || ''
+    ).trim();
+    const whatsappDigits = sanitizePhone(rawWhatsapp || phoneDigits);
+    return { phoneDigits, displayPhone, email, whatsappDigits };
+}
+
+function applyLandingBusinessInfo(publicData = {}) {
+    const companyName = String(publicData.companyName || publicData.businessName || 'SSPC').trim() || 'SSPC';
+    const { phoneDigits, displayPhone, email } = resolveBusinessContacts(publicData);
 
     const aboutCompanyNameEl = document.getElementById('aboutCompanyName');
     const footerCompanyNameEl = document.getElementById('footerCompanyName');
@@ -76,8 +94,18 @@ function renderEmpty(message) {
     grid.innerHTML = `<div class="col-12 text-center text-muted">${message}</div>`;
 }
 
+function resolveLandingImageUrl(item = {}) {
+    const raw = String(item.imageUrl || '').trim();
+    if (!raw) return '/factory-hero.png';
+    if (raw.startsWith('http://')) return `https://${raw.slice(7)}`;
+    if (raw.startsWith('https://')) return raw;
+    if (raw.startsWith('//')) return `https:${raw}`;
+    if (raw.startsWith('/')) return raw;
+    return `/${raw.replace(/^\.?\//, '')}`;
+}
+
 function createStockCard(item, phone, whatsapp) {
-    const img = item.imageUrl || 'factory-hero.png';
+    const img = resolveLandingImageUrl(item);
     const qty = item.quantity ?? 0;
     const unit = item.unit || 'pcs';
     const productCategory = item.productCategory || item.category || item.type || 'Other';
@@ -94,7 +122,7 @@ function createStockCard(item, phone, whatsapp) {
         <div class="col-md-6 col-lg-3">
             <div class="stock-card h-100">
                 <div class="stock-image">
-                    <img src="${img}" alt="${item.name || 'Stock item'}">
+                    <img src="${img}" alt="${item.name || 'Stock item'}" loading="lazy" onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='/hero.png';}">
                 </div>
                 <div class="stock-body">
                     <div class="stock-title">${item.name || 'Item'}</div>
@@ -133,8 +161,9 @@ async function loadLandingStock() {
         const publicDoc = await db.collection('public').doc(businessId).get();
         const publicData = publicDoc.exists ? publicDoc.data() : {};
         applyLandingBusinessInfo(publicData);
-        const phone = sanitizePhone(publicData.phone || publicData.companyPhone || '');
-        const whatsapp = sanitizePhone(publicData.whatsapp || publicData.companyWhatsapp || phone);
+        const contacts = resolveBusinessContacts(publicData);
+        const phone = contacts.phoneDigits;
+        const whatsapp = contacts.whatsappDigits;
 
         if (landingFeaturedUnsubscribe) {
             landingFeaturedUnsubscribe();
