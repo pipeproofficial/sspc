@@ -13,9 +13,13 @@ function sanitizePhone(value) {
     return String(value).replace(/[^\d]/g, '');
 }
 
-function normalizeCategory(value) {
-    const text = String(value || '').trim();
-    return text || 'Other';
+function normalizeCategory(item = {}) {
+    const raw = String(item.productCategory || item.category || item.type || '').toLowerCase();
+    const name = String(item.name || '').toLowerCase();
+    if (raw.includes('rcc') || raw.includes('pipe') || name.includes('pipe')) return 'RCC Pipes';
+    if (raw.includes('septic') || name.includes('septic')) return 'Septic Tanks';
+    if ((raw.includes('water') && raw.includes('tank')) || name.includes('water tank')) return 'Water Tanks';
+    return 'Other Products';
 }
 
 function applyProductsBusinessInfo(publicData = {}) {
@@ -76,6 +80,11 @@ function createProductCard(item, phone, whatsapp) {
     const qty = item.quantity ?? 0;
     const unit = item.unit || 'pcs';
     const category = item.category || 'Other';
+    const pipeType = item.pipeType || '-';
+    const loadClass = item.loadClass || '-';
+    const categoryText = String(category || '').toLowerCase();
+    const nameText = String(item.name || '').toLowerCase();
+    const isSeptic = categoryText.includes('septic') || nameText.includes('septic');
     const callLink = phone ? `tel:+${phone}` : '#';
     const waText = encodeURIComponent(`Hi, I want pricing for ${item.name}.`);
     const waLink = whatsapp ? `https://wa.me/${whatsapp}?text=${waText}` : '#';
@@ -93,6 +102,8 @@ function createProductCard(item, phone, whatsapp) {
                 <p>${item.description || 'High-strength pipe solution for infrastructure projects.'}</p>
                 <div class="product-specs">
                     <span>Category: ${category}</span>
+                    ${isSeptic ? '' : `<span>Pipe Type: ${pipeType}</span>`}
+                    ${isSeptic ? '' : `<span>Load Class: ${loadClass}</span>`}
                     <span>Available Qty: ${qty}</span>
                     <span>Unit: ${unit}</span>
                     ${specs.map(s => `<span>${s}</span>`).join('')}
@@ -181,7 +192,7 @@ async function loadProducts() {
                     items.push({
                         id: doc.id,
                         ...data,
-                        category: normalizeCategory(data.category || data.type)
+                        category: normalizeCategory(data)
                     });
                 });
                 allItems = items;
