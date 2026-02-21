@@ -111,6 +111,47 @@ function isRawMaterialInventoryItem(item = {}) {
     return rawTokens.some(token => category.includes(token));
 }
 
+function normalizeInvoiceText(value) {
+    return String(value || '').trim();
+}
+
+function buildInvoiceItemMetaLine(item = {}) {
+    const parts = [
+        normalizeInvoiceText(item.category || item.productCategory || item.productType || ''),
+        normalizeInvoiceText(item.pipeType || ''),
+        normalizeInvoiceText(item.loadClass || '')
+    ].filter(Boolean);
+    return parts.join(' | ');
+}
+
+function buildInvoiceItemDisplayName(item = {}) {
+    const name = normalizeInvoiceText(item.name || item.itemName || 'Item') || 'Item';
+    const meta = buildInvoiceItemMetaLine(item);
+    return meta ? `${name} | ${meta}` : name;
+}
+
+function parseInvoiceItemNameFromOption(option) {
+    if (!option) return 'Item';
+    return normalizeInvoiceText(option.dataset.name || option.textContent || '').split(' (Stock:')[0] || 'Item';
+}
+
+function normalizeStateForTax(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function resolveAutoTaxMode(companyState, customerState) {
+    const company = normalizeStateForTax(companyState);
+    const customer = normalizeStateForTax(customerState);
+    if (!company || !customer) return 'CGST_SGST';
+    return company === customer ? 'CGST_SGST' : 'IGST';
+}
+
+function resolveTaxMode(preferredTaxMode, companyState, customerState) {
+    const explicit = String(preferredTaxMode || '').trim().toUpperCase();
+    if (explicit === 'IGST' || explicit === 'CGST_SGST') return explicit;
+    return resolveAutoTaxMode(companyState, customerState);
+}
+
 // Premium Invoice Templates with Preview System
 const invoiceTemplates = {
     modern: {
@@ -355,6 +396,147 @@ async function initializeInvoiceLocationSelectors() {
     );
 }
 
+function encodeAddressList(addresses = []) {
+    try {
+        return encodeURIComponent(JSON.stringify(addresses || []));
+    } catch (error) {
+        return encodeURIComponent('[]');
+    }
+}
+
+function decodeAddressList(encoded = '') {
+    if (!encoded) return [];
+    try {
+        const data = JSON.parse(decodeURIComponent(encoded));
+        return Array.isArray(data) ? data : [];
+    } catch (error) {
+        return [];
+    }
+}
+
+function normalizeCustomerAddresses(customer = {}, kind = 'bill') {
+    const key = kind === 'ship' ? 'shipToAddresses' : 'billToAddresses';
+    const list = Array.isArray(customer?.[key]) ? customer[key] : [];
+    if (list.length) {
+        const mapped = list.map((a, idx) => ({
+            label: String(a?.label || (kind === 'ship' ? 'Ship' : 'Bill')).trim() || (kind === 'ship' ? 'Ship' : 'Bill'),
+            address: String(a?.address || '').trim(),
+            state: String(a?.state || '').trim(),
+            district: String(a?.district || '').trim(),
+            mandal: String(a?.mandal || '').trim(),
+            village: String(a?.village || '').trim(),
+            zip: String(a?.zip || '').trim(),
+            isDefault: Boolean(a?.isDefault) || idx === 0
+        }));
+        if (!mapped.some(a => a.isDefault) && mapped[0]) mapped[0].isDefault = true;
+        return mapped;
+    }
+    const legacy = {
+        label: kind === 'ship' ? 'Ship' : 'Bill',
+        address: String(customer?.address || '').trim(),
+        state: String(customer?.state || '').trim(),
+        district: String(customer?.district || '').trim(),
+        mandal: String(customer?.mandal || '').trim(),
+        village: String(customer?.village || '').trim(),
+        zip: String(customer?.zip || '').trim(),
+        isDefault: true
+    };
+    return (legacy.address || legacy.state || legacy.district || legacy.mandal || legacy.village || legacy.zip) ? [legacy] : [];
+}
+
+function getDefaultAddress(addresses = []) {
+    if (!Array.isArray(addresses) || !addresses.length) return null;
+    return addresses.find(a => a?.isDefault) || addresses[0] || null;
+}
+
+function getAddressOptionLabel(address = {}, idx = 0, kind = 'bill') {
+    const customLabel = String(address?.label || '').trim();
+    const label = customLabel || `${kind === 'ship' ? 'Ship' : 'Bill'} ${idx + 1}`;
+    const line = String(address?.address || '').trim();
+    return line ? `${label} - ${line}` : label;
+}
+
+function populateInvoiceAddressSelect(selectEl, addresses = [], kind = 'bill') {
+    if (!selectEl) return;
+    const placeholder = kind === 'ship' ? 'Select Ship To...' : 'Select Bill To...';
+    selectEl.innerHTML = `<option value="">${placeholder}</option>`;
+    addresses.forEach((address, idx) => {
+        const option = document.createElement('option');
+        option.value = String(idx);
+        option.textContent = getAddressOptionLabel(address, idx, kind);
+        option.dataset.label = String(address?.label || '').trim();
+        option.dataset.address = String(address?.address || '');
+        option.dataset.state = String(address?.state || '');
+        option.dataset.district = String(address?.district || '');
+        option.dataset.mandal = String(address?.mandal || '');
+        option.dataset.village = String(address?.village || '');
+        option.dataset.zip = String(address?.zip || '');
+        option.dataset.isDefault = String(Boolean(address?.isDefault));
+        selectEl.appendChild(option);
+    });
+    const defaultIdx = addresses.findIndex(a => a?.isDefault);
+    if (defaultIdx >= 0) {
+        selectEl.value = String(defaultIdx);
+    } else if (addresses.length) {
+        selectEl.value = '0';
+    }
+}
+
+function getSelectedAddressFromSelect(selectId) {
+    const selectEl = document.getElementById(selectId);
+    const option = selectEl?.selectedOptions?.[0];
+    if (!option || !option.value) return null;
+    return {
+        label: option.dataset.label || '',
+        address: option.dataset.address || '',
+        state: option.dataset.state || '',
+        district: option.dataset.district || '',
+        mandal: option.dataset.mandal || '',
+        village: option.dataset.village || '',
+        zip: option.dataset.zip || ''
+    };
+}
+
+function populateInvoiceAddressSelectorsFromCustomerOption(customerOption) {
+    const billSelect = document.getElementById('invBillToSelect');
+    const shipSelect = document.getElementById('invShipToSelect');
+    const billAddresses = decodeAddressList(customerOption?.dataset?.billto || '');
+    const shipAddressesRaw = decodeAddressList(customerOption?.dataset?.shipto || '');
+    const shipAddresses = shipAddressesRaw.length ? shipAddressesRaw : billAddresses;
+
+    populateInvoiceAddressSelect(billSelect, billAddresses, 'bill');
+    populateInvoiceAddressSelect(shipSelect, shipAddresses, 'ship');
+}
+
+function escapeAttr(value) {
+    return String(value || '').replace(/"/g, '&quot;');
+}
+
+function buildCustomerOptionHtml(customer = {}) {
+    const name = String(customer.name || '').trim();
+    const balance = Number(customer.outstandingBalance || 0);
+    const balText = balance < 0 ? ` (Credit: ₹${Math.abs(balance)})` : '';
+    const billTo = normalizeCustomerAddresses(customer, 'bill');
+    const shipTo = normalizeCustomerAddresses(customer, 'ship');
+    const primaryBill = getDefaultAddress(billTo) || {};
+    return `
+        <option value="${escapeAttr(name)}"
+            data-balance="${balance}"
+            data-address="${escapeAttr(primaryBill.address || '')}"
+            data-city="${escapeAttr(customer.city || '')}"
+            data-state="${escapeAttr(primaryBill.state || customer.state || '')}"
+            data-zip="${escapeAttr(primaryBill.zip || customer.zip || '')}"
+            data-village="${escapeAttr(primaryBill.village || customer.village || '')}"
+            data-district="${escapeAttr(primaryBill.district || customer.district || '')}"
+            data-mandal="${escapeAttr(primaryBill.mandal || customer.mandal || '')}"
+            data-phone="${escapeAttr(customer.phone || '')}"
+            data-taxid="${escapeAttr(customer.taxId || '')}"
+            data-billto="${escapeAttr(encodeAddressList(billTo))}"
+            data-shipto="${escapeAttr(encodeAddressList(shipTo))}"
+        >${name}${balText}</option>
+    `;
+}
+
 function setupEventListeners() {
     if (createInvoiceBtn) {
         createInvoiceBtn.addEventListener('click', openInvoiceModal);
@@ -510,6 +692,8 @@ function setupEventListeners() {
     // Filter projects when customer changes
     const custSelect = document.getElementById('invCustomerSelect');
     const projectSelect = document.getElementById('invProjectSelect');
+    const billToSelect = document.getElementById('invBillToSelect');
+    const shipToSelect = document.getElementById('invShipToSelect');
     if (custSelect && projectSelect) {
         custSelect.addEventListener('change', () => {
             const selectedCustomer = custSelect.value;
@@ -532,8 +716,26 @@ function setupEventListeners() {
                 opt.hidden = selectedCustomer && projectCustomer && projectCustomer !== selectedCustomer;
             });
             projectSelect.value = "";
+            populateInvoiceAddressSelectorsFromCustomerOption(custSelect.selectedOptions?.[0] || null);
             syncShipToFromBillTo();
             updateInvoicePreview();
+        });
+    }
+
+    if (billToSelect) {
+        billToSelect.addEventListener('change', () => {
+            syncShipToFromBillTo();
+            updateInvoicePreview();
+        });
+    }
+
+    if (shipToSelect) {
+        shipToSelect.addEventListener('change', () => {
+            const shipSame = document.getElementById('invShipSame');
+            if (!shipSame?.checked) {
+                syncShipToFromBillTo();
+                updateInvoicePreview();
+            }
         });
     }
 
@@ -577,24 +779,11 @@ async function reloadInvoiceCustomers(selectName = '') {
             .collection('customers').orderBy('name').get();
         custSelect.innerHTML = '<option value="">Select Customer...</option>';
         custSnap.forEach(doc => {
-            const c = doc.data();
-            const balText = c.outstandingBalance < 0 ? ` (Credit: ₹${Math.abs(c.outstandingBalance)})` : '';
-            custSelect.innerHTML += `
-                <option value="${c.name}"
-                    data-balance="${c.outstandingBalance || 0}"
-                    data-address="${(c.address || '').replace(/"/g, '&quot;')}"
-                    data-city="${(c.city || '').replace(/"/g, '&quot;')}"
-                    data-state="${(c.state || '').replace(/"/g, '&quot;')}"
-                    data-zip="${(c.zip || '').replace(/"/g, '&quot;')}"
-                    data-village="${(c.village || '').replace(/"/g, '&quot;')}"
-                    data-district="${(c.district || '').replace(/"/g, '&quot;')}"
-                    data-mandal="${(c.mandal || '').replace(/"/g, '&quot;')}"
-                    data-phone="${(c.phone || '').replace(/"/g, '&quot;')}"
-                    data-taxid="${(c.taxId || '').replace(/"/g, '&quot;')}"
-                >${c.name}${balText}</option>
-            `;
+            const c = doc.data() || {};
+            custSelect.innerHTML += buildCustomerOptionHtml(c);
         });
         custSelect.innerHTML += '<option value="__add_customer__">+ Add Customer...</option>';
+        populateInvoiceAddressSelectorsFromCustomerOption(custSelect.selectedOptions?.[0] || null);
         if (selectName) {
             custSelect.value = selectName;
             custSelect.dispatchEvent(new Event('change'));
@@ -645,6 +834,10 @@ async function openInvoiceModal(options = {}) {
     clearSignaturePad();
     const shipSame = document.getElementById('invShipSame');
     if (shipSame) shipSame.checked = true;
+    const billToSelect = document.getElementById('invBillToSelect');
+    const shipToSelect = document.getElementById('invShipToSelect');
+    if (billToSelect) billToSelect.innerHTML = '<option value="">Select Bill To...</option>';
+    if (shipToSelect) shipToSelect.innerHTML = '<option value="">Select Ship To...</option>';
     await setStateDistrictValues(
         document.getElementById('invShipState'),
         document.getElementById('invShipDistrict'),
@@ -670,24 +863,11 @@ async function openInvoiceModal(options = {}) {
 
         custSelect.innerHTML = '<option value="">Select Customer...</option>';
         custSnap.forEach(doc => {
-            const c = doc.data();
-            const balText = c.outstandingBalance < 0 ? ` (Credit: ₹${Math.abs(c.outstandingBalance)})` : '';
-            custSelect.innerHTML += `
-                <option value="${c.name}"
-                    data-balance="${c.outstandingBalance || 0}"
-                    data-address="${(c.address || '').replace(/"/g, '&quot;')}"
-                    data-city="${(c.city || '').replace(/"/g, '&quot;')}"
-                    data-state="${(c.state || '').replace(/"/g, '&quot;')}"
-                    data-zip="${(c.zip || '').replace(/"/g, '&quot;')}"
-                    data-village="${(c.village || '').replace(/"/g, '&quot;')}"
-                    data-district="${(c.district || '').replace(/"/g, '&quot;')}"
-                    data-mandal="${(c.mandal || '').replace(/"/g, '&quot;')}"
-                    data-phone="${(c.phone || '').replace(/"/g, '&quot;')}"
-                    data-taxid="${(c.taxId || '').replace(/"/g, '&quot;')}"
-                >${c.name}${balText}</option>
-            `;
+            const c = doc.data() || {};
+            custSelect.innerHTML += buildCustomerOptionHtml(c);
         });
         custSelect.innerHTML += '<option value="__add_customer__">+ Add Customer...</option>';
+        populateInvoiceAddressSelectorsFromCustomerOption(custSelect.selectedOptions?.[0] || null);
         
         vehicleSelect.innerHTML = '<option value="">Select Vehicle...</option>';
         vehicleSnap.forEach(doc => {
@@ -802,7 +982,11 @@ function addInvoiceItemRow(prefill = {}) {
         const hsn = resolveHsn(i.hsn, inferHsnFromItem(i));
         const sellingPrice = resolveInvoiceItemPrice(i);
         const costPrice = toFiniteNumber(i.costPrice ?? i.purchasePrice, 0);
-        return `<option value="${i.id}" data-price="${sellingPrice}" data-cost="${costPrice}" data-hsn="${hsn}" data-gst="${gstRate}">${i.name} (Stock: ${i.quantity})</option>`;
+        const category = normalizeInvoiceText(i.productCategory || i.productType || i.category || '');
+        const pipeType = normalizeInvoiceText(i.pipeType || '');
+        const loadClass = normalizeInvoiceText(i.loadClass || '');
+        const displayName = buildInvoiceItemDisplayName({ name: i.name, category, pipeType, loadClass });
+        return `<option value="${escapeAttr(i.id)}" data-name="${escapeAttr(i.name || '')}" data-category="${escapeAttr(category)}" data-pipetype="${escapeAttr(pipeType)}" data-loadclass="${escapeAttr(loadClass)}" data-price="${sellingPrice}" data-cost="${costPrice}" data-hsn="${escapeAttr(hsn)}" data-gst="${gstRate}">${displayName} (Stock: ${i.quantity})</option>`;
     }).join('');
     
     const html = `
@@ -829,9 +1013,15 @@ function addInvoiceItemRow(prefill = {}) {
     if (prefill.name && !select.value) {
         const opt = document.createElement('option');
         opt.value = '__custom__';
-        opt.textContent = `${prefill.name} (Custom)`;
+        opt.dataset.name = prefill.name || '';
+        opt.dataset.category = prefill.category || prefill.productCategory || prefill.productType || '';
+        opt.dataset.pipetype = prefill.pipeType || '';
+        opt.dataset.loadclass = prefill.loadClass || '';
+        opt.textContent = `${buildInvoiceItemDisplayName(prefill)} (Custom)`;
         opt.dataset.price = prefill.price || 0;
         opt.dataset.cost = prefill.costPrice || 0;
+        opt.dataset.hsn = prefill.hsn || '';
+        opt.dataset.gst = resolveGstRate(prefill.gstRate, defaultGst);
         select.appendChild(opt);
         select.value = '__custom__';
     }
@@ -1000,6 +1190,7 @@ function toggleShipToFields() {
     const shipSame = document.getElementById('invShipSame');
     const disabled = shipSame ? shipSame.checked : true;
     const fields = [
+        'invShipToSelect',
         'invShipName', 'invShipPhone', 'invShipAddress',
         'invShipState', 'invShipZip', 'invShipTaxId', 'invShipVillage', 'invShipDistrict', 'invShipMandal'
     ];
@@ -1011,50 +1202,74 @@ function toggleShipToFields() {
 
 function syncShipToFromBillTo() {
     const shipSame = document.getElementById('invShipSame');
-    if (!shipSame || !shipSame.checked) return;
+    if (!shipSame || !shipSame.checked) {
+        return;
+    }
+    const shipToSelect = document.getElementById('invShipToSelect');
+    if (shipToSelect) shipToSelect.value = '';
+}
+
+function getBillToData() {
     const customerSelect = document.getElementById('invCustomerSelect');
-    const opt = customerSelect?.selectedOptions?.[0];
-    if (!opt) return;
-    const setVal = (id, val) => {
-        const el = document.getElementById(id);
-        if (el) {
-            if (el.tagName === 'SELECT' && val) {
-                const exists = Array.from(el.options).some(o => o.value === val);
-                if (!exists) {
-                    el.innerHTML = `<option value="">Select</option><option value="${val}">${val}</option>`;
-                }
-            }
-            el.value = val || '';
-        }
+    const customerOption = customerSelect?.selectedOptions?.[0] || null;
+    const selectedBillAddress = getSelectedAddressFromSelect('invBillToSelect');
+    const fallback = {
+        label: '',
+        address: customerOption?.dataset?.address || '',
+        state: customerOption?.dataset?.state || '',
+        zip: customerOption?.dataset?.zip || '',
+        village: customerOption?.dataset?.village || '',
+        district: customerOption?.dataset?.district || '',
+        mandal: customerOption?.dataset?.mandal || ''
     };
-    setVal('invShipName', opt.value || '');
-    setVal('invShipPhone', opt.dataset.phone || '');
-    setVal('invShipAddress', opt.dataset.address || '');
-    setVal('invShipState', opt.dataset.state || '');
-    setVal('invShipZip', opt.dataset.zip || '');
-    setVal('invShipVillage', opt.dataset.village || '');
-    setVal('invShipDistrict', opt.dataset.district || '');
-    setVal('invShipMandal', opt.dataset.mandal || '');
-    setVal('invShipTaxId', opt.dataset.taxid || '');
+    return {
+        billLabel: selectedBillAddress?.label || fallback.label || '',
+        customerAddress: selectedBillAddress?.address || fallback.address || '',
+        customerCity: customerOption?.dataset?.city || '',
+        customerState: selectedBillAddress?.state || fallback.state || '',
+        customerZip: selectedBillAddress?.zip || fallback.zip || '',
+        customerVillage: selectedBillAddress?.village || fallback.village || '',
+        customerDistrict: selectedBillAddress?.district || fallback.district || '',
+        customerMandal: selectedBillAddress?.mandal || fallback.mandal || '',
+        customerPhone: customerOption?.dataset?.phone || '',
+        customerTaxId: customerOption?.dataset?.taxid || ''
+    };
 }
 
 function getShipToData() {
     const shipSame = document.getElementById('invShipSame');
-    if (shipSame && shipSame.checked) {
-        syncShipToFromBillTo();
-    }
+    const shipChecked = shipSame ? shipSame.checked : true;
+    const customerSelect = document.getElementById('invCustomerSelect');
+    const customerOption = customerSelect?.selectedOptions?.[0] || null;
+    const selectedBillAddress = getSelectedAddressFromSelect('invBillToSelect');
+    const selectedShipAddress = getSelectedAddressFromSelect('invShipToSelect');
+    const effectiveAddress = shipChecked ? selectedBillAddress : selectedShipAddress;
+    const fallbackAddress = shipChecked
+        ? {
+            label: '',
+            address: customerOption?.dataset?.address || '',
+            state: customerOption?.dataset?.state || '',
+            zip: customerOption?.dataset?.zip || '',
+            village: customerOption?.dataset?.village || '',
+            district: customerOption?.dataset?.district || '',
+            mandal: customerOption?.dataset?.mandal || ''
+        }
+        : {};
     return {
-        shipSame: shipSame ? shipSame.checked : true,
-        shipName: document.getElementById('invShipName')?.value || '',
-        shipPhone: document.getElementById('invShipPhone')?.value || '',
-        shipAddress: document.getElementById('invShipAddress')?.value || '',
+        shipSame: shipChecked,
+        shipLabel: shipChecked
+            ? (selectedBillAddress?.label || '')
+            : (selectedShipAddress?.label || ''),
+        shipName: (effectiveAddress?.label || customerOption?.value || ''),
+        shipPhone: customerOption?.dataset?.phone || '',
+        shipAddress: effectiveAddress?.address || fallbackAddress.address || '',
         shipCity: '',
-        shipState: document.getElementById('invShipState')?.value || '',
-        shipZip: document.getElementById('invShipZip')?.value || '',
-        shipVillage: document.getElementById('invShipVillage')?.value || '',
-        shipDistrict: document.getElementById('invShipDistrict')?.value || '',
-        shipMandal: document.getElementById('invShipMandal')?.value || '',
-        shipTaxId: document.getElementById('invShipTaxId')?.value || ''
+        shipState: effectiveAddress?.state || fallbackAddress.state || '',
+        shipZip: effectiveAddress?.zip || fallbackAddress.zip || '',
+        shipVillage: effectiveAddress?.village || fallbackAddress.village || '',
+        shipDistrict: effectiveAddress?.district || fallbackAddress.district || '',
+        shipMandal: effectiveAddress?.mandal || fallbackAddress.mandal || '',
+        shipTaxId: customerOption?.dataset?.taxid || ''
     };
 }
 
@@ -1174,16 +1389,16 @@ function getDocumentStatus(docType, balance, amountPaid) {
 function buildInvoicePreviewData(company) {
     const customerSelect = document.getElementById('invCustomerSelect');
     const customer = customerSelect?.value || '';
-    const selectedCustomerOption = customerSelect?.selectedOptions?.[0] || null;
-    const customerAddress = selectedCustomerOption?.dataset?.address || '';
-    const customerCity = selectedCustomerOption?.dataset?.city || '';
-    const customerState = selectedCustomerOption?.dataset?.state || '';
-    const customerZip = selectedCustomerOption?.dataset?.zip || '';
-    const customerVillage = selectedCustomerOption?.dataset?.village || '';
-    const customerDistrict = selectedCustomerOption?.dataset?.district || '';
-    const customerMandal = selectedCustomerOption?.dataset?.mandal || '';
-    const customerPhone = selectedCustomerOption?.dataset?.phone || '';
-    const customerTaxId = selectedCustomerOption?.dataset?.taxid || '';
+    const billToData = getBillToData();
+    const customerAddress = billToData.customerAddress;
+    const customerCity = billToData.customerCity;
+    const customerState = billToData.customerState;
+    const customerZip = billToData.customerZip;
+    const customerVillage = billToData.customerVillage;
+    const customerDistrict = billToData.customerDistrict;
+    const customerMandal = billToData.customerMandal;
+    const customerPhone = billToData.customerPhone;
+    const customerTaxId = billToData.customerTaxId;
     const dateVal = document.getElementById('invDate')?.value || '';
     const project = document.getElementById('invProjectSelect')?.value || '';
     const poNumber = document.getElementById('invPoNumber')?.value || '';
@@ -1197,6 +1412,8 @@ function buildInvoicePreviewData(company) {
     const templateOptions = getInvoiceTemplateOptionsFromForm();
     const companyForDoc = applyInvoiceCompanyOverrides(company, templateOptions);
     const shipTo = getShipToData();
+    const placeOfSupply = customerState || shipTo.shipState || companyForDoc.state || companyForDoc.companyState || '';
+    const taxMode = resolveTaxMode('', companyForDoc.state || companyForDoc.companyState || '', customerState);
 
     const items = [];
     document.querySelectorAll('#invItemsContainer tr').forEach(row => {
@@ -1207,8 +1424,11 @@ function buildInvoicePreviewData(company) {
         const price = parseFloat(row.querySelector('.item-price')?.value || '0') || 0;
         const gstRate = resolveGstRate(option?.dataset?.gst, businessSettings.gstRate);
         const hsn = option?.dataset?.hsn || '';
-        const name = option?.text?.split(' (')[0] || 'Item';
-        items.push({ name, quantity: qty, price, gstRate, hsn });
+        const name = parseInvoiceItemNameFromOption(option);
+        const category = option?.dataset?.category || '';
+        const pipeType = option?.dataset?.pipetype || '';
+        const loadClass = option?.dataset?.loadclass || '';
+        items.push({ name, category, pipeType, loadClass, quantity: qty, price, gstRate, hsn });
     });
 
     const total = items.reduce((sum, item) => {
@@ -1231,6 +1451,7 @@ function buildInvoicePreviewData(company) {
         dateStr,
         company: companyForDoc,
         customer,
+        billLabel: billToData.billLabel,
         customerAddress,
         customerCity,
         customerState,
@@ -1252,6 +1473,8 @@ function buildInvoicePreviewData(company) {
         driver,
         poNumber,
         poDate: poDateStr,
+        placeOfSupply,
+        taxMode,
         docType,
         templateOptions
     };
@@ -1920,25 +2143,26 @@ async function saveInvoice(options = {}) {
     const selectedOrderOption = projectSelectEl?.selectedOptions?.[0] || null;
     const linkedOrderId = selectedOrderOption?.dataset?.orderId || '';
     const customerSelect = document.getElementById('invCustomerSelect');
-    const selectedCustomerOption = customerSelect?.selectedOptions?.[0] || null;
-    const customerAddress = selectedCustomerOption?.dataset?.address || '';
-    const customerCity = selectedCustomerOption?.dataset?.city || '';
-    const customerState = selectedCustomerOption?.dataset?.state || '';
-    const customerZip = selectedCustomerOption?.dataset?.zip || '';
-    const customerVillage = selectedCustomerOption?.dataset?.village || '';
-    const customerDistrict = selectedCustomerOption?.dataset?.district || '';
-    const custMandalRaw = selectedCustomerOption?.dataset?.mandal || '';
-    const custMandal = (custMandalRaw && typeof custMandalRaw === 'object' && 'value' in custMandalRaw)
-        ? custMandalRaw.value
-        : custMandalRaw;
-    const customerPhone = selectedCustomerOption?.dataset?.phone || '';
-    const customerTaxId = selectedCustomerOption?.dataset?.taxid || '';
+    const billToData = getBillToData();
+    const customerAddress = billToData.customerAddress;
+    const customerCity = billToData.customerCity;
+    const customerState = billToData.customerState;
+    const customerZip = billToData.customerZip;
+    const customerVillage = billToData.customerVillage;
+    const customerDistrict = billToData.customerDistrict;
+    const custMandal = billToData.customerMandal;
+    const customerPhone = billToData.customerPhone;
+    const customerTaxId = billToData.customerTaxId;
     const poNumber = document.getElementById('invPoNumber').value;
     const poDateVal = document.getElementById('invPoDate').value;
     const docType = getDocumentTypeFromForm();
     const isCommercialInvoice = docType === 'Invoice';
     const templateOptions = getInvoiceTemplateOptionsFromForm();
     const shipTo = getShipToData();
+    const company = await getCompanySettings();
+    const companyForDoc = applyInvoiceCompanyOverrides(company, templateOptions);
+    const placeOfSupply = customerState || shipTo.shipState || companyForDoc.state || companyForDoc.companyState || '';
+    const taxMode = resolveTaxMode('', companyForDoc.state || companyForDoc.companyState || '', customerState);
     const balance = amount - amountPaid;
     const selectedCopyLabels = autoPrint
         ? (isCommercialInvoice ? ['Original', 'Duplicate', 'Triplicate'] : ['Original'])
@@ -1964,7 +2188,10 @@ async function saveInvoice(options = {}) {
             
             items.push({
                 itemId: select.value,
-                name: option.text.split(' (')[0],
+                name: parseInvoiceItemNameFromOption(option),
+                category: option?.dataset?.category || '',
+                pipeType: option?.dataset?.pipetype || '',
+                loadClass: option?.dataset?.loadclass || '',
                 quantity: qty,
                 price: parseFloat(row.querySelector('.item-price').value),
                 costPrice: costPrice,
@@ -2027,6 +2254,7 @@ async function saveInvoice(options = {}) {
             type: docType,
             docType,
             customer: customer,
+            billLabel: billToData.billLabel || '',
             customerAddress,
             customerCity,
             customerState,
@@ -2037,6 +2265,8 @@ async function saveInvoice(options = {}) {
             customerPhone,
             customerTaxId,
             shipTo,
+            placeOfSupply,
+            taxMode,
             amount: amount,
             totalAmount: amount,
             grandTotal: amount,
@@ -2128,8 +2358,6 @@ async function saveInvoice(options = {}) {
         }
         
         if (autoPrint) {
-            const company = await getCompanySettings();
-            const companyForDoc = applyInvoiceCompanyOverrides(company, templateOptions);
             const dateStr = formatDate(new Date(dateVal));
             const poDateStr = poDateVal ? formatDate(new Date(poDateVal)) : '';
             const logoHtml = companyForDoc.logoUrl
@@ -2173,6 +2401,8 @@ async function saveInvoice(options = {}) {
                 driver,
                 poNumber,
                 poDate: poDateStr,
+                placeOfSupply,
+                taxMode,
                 docType,
                 templateOptions
             };
@@ -3498,6 +3728,7 @@ function getInvoiceTemplate(type, data = {}) {
         const gstAmount = (price * gstRate) / 100;
         const finalRate = price + gstAmount;
         const lineAmount = finalRate * qty;
+        const itemMeta = buildInvoiceItemMetaLine(i);
         const transportCell = idx === 0
             ? `&#8377;${transport.toLocaleString()}`
             : '-';
@@ -3506,6 +3737,7 @@ function getInvoiceTemplate(type, data = {}) {
                 <td>${idx + 1}</td>
                 <td>
                     <div class="item-name">${i.name}</div>
+                    ${itemMeta ? `<div class="muted">${itemMeta}</div>` : ''}
                 </td>
                 <td>${i.hsn || '-'}</td>
                 <td class="text-end">${qty}</td>
@@ -3565,10 +3797,10 @@ function getInvoiceTemplate(type, data = {}) {
         : '';
 
     const invoiceLabel = invoiceNo || safeId.substr(0,6).toUpperCase();
-    const pos = placeOfSupply || state;
+    const pos = placeOfSupply || customerState || shipTo?.shipState || state;
     const docTitle = docType || 'Invoice';
     const isInvoiceDoc = docTitle.toLowerCase() === 'invoice';
-    const taxModeValue = taxMode || 'CGST_SGST';
+    const taxModeValue = resolveTaxMode(taxMode, state, customerState || shipTo?.shipState || '');
     const eway = ewayBill || data.eWayBill || '';
     const copyText = getCopyLabelDisplay(copyLabel || '').toUpperCase();
     const layoutKey = type || 'corporate';
@@ -3914,7 +4146,4 @@ function getInvoiceTemplate(type, data = {}) {
 </html>
     `;
 }
-
 window.getInvoiceTemplate = getInvoiceTemplate;
-  
-
