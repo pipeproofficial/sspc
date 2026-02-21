@@ -40,8 +40,38 @@ let notificationState = { inventory: [], vehicles: [] };
 let notificationUnsubscribers = [];
 let notificationsBusinessId = '';
 let productMasterCategoryCache = new Map();
+let productMasterByIdCache = new Map();
+let productMasterVariantCache = new Map();
+let productMasterNameCountCache = new Map();
 let productMasterCategoryCacheBusinessId = '';
 let revenueMomentumState = { period: 'monthly', labels: [], data: [] };
+
+function buildInventoryFullLabel(item = {}, fallback = {}) {
+    const name = item.name || 'Unnamed';
+    const category = item.category || item.productType || fallback.category || '-';
+    const pipeType = item.pipeType || fallback.pipeType || '-';
+    const loadClass = item.loadClass || fallback.loadClass || '-';
+    return `${name} | ${category} | ${pipeType} | ${loadClass}`;
+}
+
+function normalizeText(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function isGenericFinishedCategory(value) {
+    const normalized = normalizeText(value);
+    if (!normalized) return true;
+    return normalized.includes('finished');
+}
+
+function buildStockVariantKey(item = {}) {
+    const name = normalizeText(item.name || item.productName || '');
+    if (!name) return '';
+    const category = normalizeText(item.category || item.productCategory || item.productType || '');
+    const pipeType = normalizeText(item.pipeType || '');
+    const loadClass = normalizeText(item.loadClass || '');
+    return `${name}||${category}||${pipeType}||${loadClass}`;
+}
 
 // Initialize Dashboard
 document.addEventListener('DOMContentLoaded', async () => {
@@ -357,7 +387,7 @@ async function loadDashboardData() {
             }
         }
         // Update stats
-        updateDashboardStats(businessId);
+        updateDashboardStats(businessId, canViewRevenue);
 
     } catch (error) {
         console.error('Error loading dashboard data:', error);
@@ -366,7 +396,7 @@ async function loadDashboardData() {
 }
 
 // Update Dashboard Statistics
-async function updateDashboardStats(businessId) {
+async function updateDashboardStats(businessId, canViewRevenue = true) {
     try {
         // Get total projects
         const projectsSnapshot = await db.collection('users').doc(businessId)
@@ -385,37 +415,57 @@ async function updateDashboardStats(businessId) {
 
         const totalCustomers = customersSnapshot.size;
 
-        // Calculate monthly revenue (last 30 days)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-        const revenueSnapshot = await db.collection('users').doc(businessId)
-            .collection('transactions')
-            .where('type', '==', 'Invoice')
-            .where('status', '==', 'Paid')
-            .where('date', '>=', thirtyDaysAgo)
-            .get();
-
         let monthlyRevenue = 0;
-        revenueSnapshot.forEach(doc => {
-            monthlyRevenue += doc.data().amount || 0;
-        });
-
-        // Get pending invoices
-        const pendingSnapshot = await db.collection('users').doc(businessId)
-            .collection('transactions')
-            .where('type', '==', 'Invoice')
-            .where('status', '==', 'Pending')
-            .get();
-
         let pendingAmount = 0;
-        pendingSnapshot.forEach(doc => {
-            pendingAmount += doc.data().amount || 0;
-        });
+        let pendingInvoiceCount = 0;
+        let salesToday = 0;
+        if (canViewRevenue) {
+            // Calculate monthly revenue (last 30 days)
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            const revenueSnapshot = await db.collection('users').doc(businessId)
+                .collection('transactions')
+                .where('type', '==', 'Invoice')
+                .where('status', '==', 'Paid')
+                .where('date', '>=', thirtyDaysAgo)
+                .get();
+
+            revenueSnapshot.forEach(doc => {
+                monthlyRevenue += doc.data().amount || 0;
+            });
+
+            // Get pending invoices
+            const pendingSnapshot = await db.collection('users').doc(businessId)
+                .collection('transactions')
+                .where('type', '==', 'Invoice')
+                .where('status', '==', 'Pending')
+                .get();
+
+            pendingInvoiceCount = pendingSnapshot.size;
+            pendingSnapshot.forEach(doc => {
+                pendingAmount += doc.data().amount || 0;
+            });
+
+            // Sales today (paid invoices)
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const salesSnapshot = await db.collection('users').doc(businessId)
+                .collection('transactions')
+                .where('type', '==', 'Invoice')
+                .where('status', '==', 'Paid')
+                .where('date', '>=', todayStart)
+                .get();
+            salesSnapshot.forEach(doc => {
+                salesToday += doc.data().amount || 0;
+            });
+        }
         // Inventory summary
         const inventoryAllSnapshot = await db.collection('users').doc(businessId)
             .collection('inventory')
             .get();
+
+        await ensureProductMasterCategoryCache(businessId);
 
         let lowStockItems = 0;
         let totalStockQty = 0;
@@ -424,11 +474,12 @@ async function updateDashboardStats(businessId) {
             const d = doc.data();
             const qty = d.quantity || 0;
             const reorder = d.reorderLevel ?? 10;
+            const fallback = productMasterCategoryCache.get((d.name || '').toLowerCase().trim()) || {};
             totalStockQty += qty;
             if (qty <= reorder) {
                 lowStockItems += 1;
                 lowStockList.push({
-                    name: d.name || 'Unnamed',
+                    name: buildInventoryFullLabel(d, fallback),
                     qty,
                     reorder
                 });
@@ -440,9 +491,17 @@ async function updateDashboardStats(businessId) {
         inventoryAllSnapshot.forEach(doc => {
             const d = doc.data();
             if (RAW_CATEGORIES.includes(d.category)) return;
+            const fallback = productMasterCategoryCache.get((d.name || '').toLowerCase().trim()) || {};
+            let resolvedCategory = d.category || d.productType || fallback.category || '-';
+            if (String(resolvedCategory).toLowerCase().includes('finished')) {
+                resolvedCategory = d.productType || fallback.category || resolvedCategory;
+            }
+            const categoryLabel = [resolvedCategory, d.pipeType || fallback.pipeType || '', d.loadClass || fallback.loadClass || '']
+                .filter(Boolean)
+                .join(' | ');
             stockSummaryList.push({
                 name: d.name || 'Unnamed',
-                category: d.category || '-',
+                category: categoryLabel || '-',
                 qty: d.quantity ?? 0,
                 unit: d.unit || ''
             });
@@ -457,37 +516,23 @@ async function updateDashboardStats(businessId) {
             .get();
         const productionCount = productionSnapshot.size;
 
-        // Sales today (paid invoices)
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const salesSnapshot = await db.collection('users').doc(businessId)
-            .collection('transactions')
-            .where('type', '==', 'Invoice')
-            .where('status', '==', 'Paid')
-            .where('date', '>=', todayStart)
-            .get();
-        let salesToday = 0;
-        salesSnapshot.forEach(doc => {
-            salesToday += doc.data().amount || 0;
-        });
-
         // Update UI elements
         updateStatElement('totalProjects', totalProjects);
         updateStatElement('totalCustomers', totalCustomers);
-        updateStatElement('monthlyRevenue', `₹${monthlyRevenue.toLocaleString()}`);
+        updateStatElement('monthlyRevenue', canViewRevenue ? `₹${monthlyRevenue.toLocaleString()}` : 'Restricted');
 
         const pendingEl = document.getElementById('pendingInvoices');
-        if (pendingEl) pendingEl.textContent = pendingSnapshot.size;
+        if (pendingEl) pendingEl.textContent = canViewRevenue ? String(pendingInvoiceCount) : '-';
 
-        updateStatElement('revenueAmount', `₹${monthlyRevenue.toLocaleString()}`);
+        updateStatElement('revenueAmount', canViewRevenue ? `₹${monthlyRevenue.toLocaleString()}` : 'Restricted');
         updateStatElement('activeProjects', activeProjects);
         updateStatElement('lowStockItems', lowStockItems);
-        updateStatElement('pendingAmount', `₹${pendingAmount.toLocaleString()}`);
+        updateStatElement('pendingAmount', canViewRevenue ? `₹${pendingAmount.toLocaleString()}` : 'Restricted');
 
         updateStatElement('dashProductionSummary', productionCount);
         updateStatElement('dashStockSummary', totalStockItems);
-        updateStatElement('dashSalesToday', `₹${salesToday.toLocaleString()}`);
-        updateStatElement('dashPendingPayments', `₹${pendingAmount.toLocaleString()}`);
+        updateStatElement('dashSalesToday', canViewRevenue ? `₹${salesToday.toLocaleString()}` : 'Restricted');
+        updateStatElement('dashPendingPayments', canViewRevenue ? `₹${pendingAmount.toLocaleString()}` : 'Restricted');
         updateStatElement('dashLowStockAlerts', lowStockItems);
 
         const prodSub = document.getElementById('dashProductionSummarySub');
@@ -817,16 +862,18 @@ function setupNotifications(businessId) {
 
     // 1. Inventory Listener
     const unsubInventory = db.collection('users').doc(businessId).collection('inventory')
-        .onSnapshot(snapshot => {
+        .onSnapshot(async (snapshot) => {
+            await ensureProductMasterCategoryCache(businessId);
             const lowStockItems = [];
             const changes = snapshot.docChanges();
             snapshot.forEach(doc => {
                 const item = doc.data();
                 if (item.reorderLevel !== undefined && item.quantity <= item.reorderLevel) {
+                    const fallback = productMasterCategoryCache.get((item.name || '').toLowerCase().trim()) || {};
                     lowStockItems.push({
                         type: 'inventory',
                         id: doc.id,
-                        name: item.name,
+                        name: buildInventoryFullLabel(item, fallback),
                         quantity: item.quantity,
                         unit: item.unit || ''
                     });
@@ -877,13 +924,17 @@ function mapFeaturedStockDoc(item = {}, fallbackCategory = '') {
     const fallbackInfo = (fallbackCategory && typeof fallbackCategory === 'object')
         ? fallbackCategory
         : { category: fallbackCategory || '', pipeType: '', loadClass: '' };
-    const resolvedCategory = fallbackInfo.category || item.productCategory || item.category || item.type || 'Other';
+    const rawCategory = item.productType || item.productCategory || item.category || item.type || '';
+    const resolvedCategory = isGenericFinishedCategory(rawCategory)
+        ? (fallbackInfo.category || rawCategory || 'Other')
+        : rawCategory;
     return {
         name: item.name || 'Item',
         category: resolvedCategory,
-        productCategory: fallbackInfo.category || item.productCategory || '',
-        pipeType: fallbackInfo.pipeType || item.pipeType || '',
-        loadClass: fallbackInfo.loadClass || item.loadClass || '',
+        productCategory: resolvedCategory,
+        pipeType: item.pipeType || fallbackInfo.pipeType || '',
+        loadClass: item.loadClass || fallbackInfo.loadClass || '',
+        productMasterId: item.productMasterId || '',
         type: item.type || '',
         description: item.description || '',
         sku: item.sku || '',
@@ -900,6 +951,9 @@ async function ensureProductMasterCategoryCache(businessId) {
     if (productMasterCategoryCacheBusinessId === businessId && productMasterCategoryCache.size) return;
     productMasterCategoryCacheBusinessId = businessId;
     productMasterCategoryCache = new Map();
+    productMasterByIdCache = new Map();
+    productMasterVariantCache = new Map();
+    productMasterNameCountCache = new Map();
     const snap = await db.collection('users').doc(businessId).collection('product_master').get();
     snap.forEach(doc => {
         const p = doc.data() || {};
@@ -910,6 +964,17 @@ async function ensureProductMasterCategoryCache(businessId) {
             pipeType: p.pipeType || '',
             loadClass: p.loadClass || ''
         };
+        productMasterByIdCache.set(doc.id, info);
+        Array.from(new Set(keys)).forEach((key) => {
+            productMasterNameCountCache.set(key, (productMasterNameCountCache.get(key) || 0) + 1);
+        });
+        const variantKey = buildStockVariantKey({
+            name: p.name || p.productName || '',
+            category: info.category,
+            pipeType: info.pipeType,
+            loadClass: info.loadClass
+        });
+        if (variantKey) productMasterVariantCache.set(variantKey, info);
         keys.forEach((key) => productMasterCategoryCache.set(key, info));
     });
 }
@@ -928,8 +993,11 @@ async function syncPublicFeaturedStockFromChanges(businessId, changes = []) {
             ops += 1;
         } else {
             const item = change.doc.data() || {};
-            const nameKey = (item.name || '').toLowerCase().trim();
-            const fallbackCategory = nameKey ? (productMasterCategoryCache.get(nameKey) || {}) : {};
+            const nameKey = normalizeText(item.name || item.productName || '');
+            const canUseNameFallback = nameKey && (productMasterNameCountCache.get(nameKey) || 0) <= 1;
+            const fallbackCategory = (item.productMasterId && productMasterByIdCache.get(String(item.productMasterId)))
+                || (productMasterVariantCache.get(buildStockVariantKey(item)) || {})
+                || (canUseNameFallback ? (productMasterCategoryCache.get(nameKey) || {}) : {});
             if (item.showOnLanding) {
                 batch.set(featuredRef, mapFeaturedStockDoc(item, fallbackCategory), { merge: true });
             } else {
