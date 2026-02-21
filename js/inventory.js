@@ -22,6 +22,9 @@ let productImageMap = new Map();
 let productCategoryMap = new Map();
 let productMetaMap = new Map();
 let productInfoMap = new Map();
+let productByMasterId = new Map();
+let productByVariantMap = new Map();
+let productNameCountMap = new Map();
 let appDefaultGstRate = 0;
 
 function resolveGstRate(value, fallback = appDefaultGstRate) {
@@ -29,6 +32,25 @@ function resolveGstRate(value, fallback = appDefaultGstRate) {
     if (Number.isFinite(n) && n > 0) return n;
     const fb = Number(fallback);
     return Number.isFinite(fb) ? fb : 0;
+}
+
+function normalizeText(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function isGenericFinishedCategory(value) {
+    const normalized = normalizeText(value);
+    if (!normalized) return true;
+    return normalized.includes('finished');
+}
+
+function buildVariantKey({ name = '', category = '', pipeType = '', loadClass = '' } = {}) {
+    const n = normalizeText(name);
+    if (!n) return '';
+    const c = normalizeText(category);
+    const p = normalizeText(pipeType);
+    const l = normalizeText(loadClass);
+    return `${n}||${c}||${p}||${l}`;
 }
 
 async function loadBusinessDefaults(businessId) {
@@ -58,23 +80,42 @@ function isRawMaterialItem(item = {}) {
 }
 
 function buildFeaturedStockPayload(item = {}) {
-    const nameKey = (item.name || '').toLowerCase().trim();
-    const productInfo = nameKey ? (productInfoMap.get(nameKey) || {}) : {};
-    const fallbackCategory = productInfo.category || productCategoryMap.get(nameKey) || '';
-    const resolvedCategory = productInfo.category || item.category || item.type || fallbackCategory || 'Other';
+    const masterInfo = item.productMasterId ? (productByMasterId.get(String(item.productMasterId)) || {}) : {};
+    const variantInfo = buildVariantKey({
+        name: item.name || '',
+        category: item.productType || item.category || '',
+        pipeType: item.pipeType || '',
+        loadClass: item.loadClass || ''
+    });
+    const variantMatch = variantInfo ? (productByVariantMap.get(variantInfo) || {}) : {};
+    const nameKey = normalizeText(item.name || '');
+    const nameLookupAllowed = nameKey && (productNameCountMap.get(nameKey) || 0) <= 1;
+    const nameInfo = nameLookupAllowed ? (productInfoMap.get(nameKey) || {}) : {};
+    const productInfo = masterInfo.category ? masterInfo : (variantMatch.category ? variantMatch : nameInfo);
+    const rawCategory = item.productType || item.productCategory || item.category || item.type || '';
+    const fallbackCategory = productInfo.category || (nameLookupAllowed ? (productCategoryMap.get(nameKey) || '') : '');
+    const resolvedCategory = isGenericFinishedCategory(rawCategory)
+        ? (fallbackCategory || rawCategory || 'Other')
+        : rawCategory;
+    const resolvedPipeType = item.pipeType || productInfo.pipeType || '';
+    const resolvedLoadClass = item.loadClass || productInfo.loadClass || '';
+    const resolvedImage = item.imageUrl
+        || productInfo.imageUrl
+        || (nameLookupAllowed ? (productImageMap.get(nameKey) || '') : '');
     return {
         name: item.name || 'Item',
         category: resolvedCategory,
-        productCategory: productInfo.category || '',
-        pipeType: productInfo.pipeType || '',
-        loadClass: productInfo.loadClass || '',
+        productCategory: resolvedCategory,
+        pipeType: resolvedPipeType,
+        loadClass: resolvedLoadClass,
+        productMasterId: item.productMasterId || productInfo.productMasterId || '',
         type: item.type || '',
         description: item.description || '',
         sku: item.sku || '',
         dimensions: item.dimensions || '',
         quantity: Number(item.quantity ?? 0),
         unit: item.unit || 'pcs',
-        imageUrl: item.imageUrl || '',
+        imageUrl: resolvedImage,
         updatedAt: new Date()
     };
 }
@@ -115,30 +156,58 @@ async function loadInventory() {
         productCategoryMap = new Map();
         productMetaMap = new Map();
         productInfoMap = new Map();
+        productByMasterId = new Map();
+        productByVariantMap = new Map();
+        productNameCountMap = new Map();
         productSnapshot.forEach(doc => {
             const p = doc.data();
-            const key = (p?.name || '').toLowerCase();
+            const key = normalizeText(p?.name || '');
+            const category = p.category || p.productCategory || '';
+            const pipeType = p.pipeType || '';
+            const loadClass = p.loadClass || '';
+            const productInfo = {
+                category,
+                pipeType,
+                loadClass,
+                imageUrl: p?.imageUrl || '',
+                costPrice: Number(p.costPrice || 0),
+                sellingPrice: Number(p.sellingPrice || 0),
+                hsn: p.hsn || '',
+                gstRate: resolveGstRate(p.gstRate),
+                productMasterId: doc.id
+            };
+            const variantKey = buildVariantKey({
+                name: p?.name || '',
+                category,
+                pipeType,
+                loadClass
+            });
             if (p?.name && p?.imageUrl) {
                 productImageMap.set(key, p.imageUrl);
             }
-            if (p?.name && (p?.category || p?.productCategory)) {
-                productCategoryMap.set(key, p.category || p.productCategory);
+            if (key) {
+                productNameCountMap.set(key, (productNameCountMap.get(key) || 0) + 1);
+            }
+            if (p?.name && category) {
+                productCategoryMap.set(key, category);
             }
             if (p?.name) {
                 productInfoMap.set(key, {
-                    category: p.category || p.productCategory || '',
-                    pipeType: p.pipeType || '',
-                    loadClass: p.loadClass || ''
+                    category,
+                    pipeType,
+                    loadClass
                 });
             }
             if (p?.name) {
                 productMetaMap.set(key, {
-                    costPrice: Number(p.costPrice || 0),
-                    sellingPrice: Number(p.sellingPrice || 0),
-                    hsn: p.hsn || '',
-                    gstRate: resolveGstRate(p.gstRate)
+                    costPrice: productInfo.costPrice,
+                    sellingPrice: productInfo.sellingPrice,
+                    hsn: productInfo.hsn,
+                    gstRate: productInfo.gstRate
                 });
             }
+            productByMasterId.set(doc.id, productInfo);
+            if (variantKey) productByVariantMap.set(variantKey, productInfo);
         });
 
         const inventorySnapshot = await db.collection('users').doc(businessId)
@@ -148,6 +217,7 @@ async function loadInventory() {
 
         inventoryData = [];
         const allInventoryItems = [];
+        const pendingBackfills = [];
         const tbody = inventoryTable.querySelector('tbody');
         tbody.innerHTML = '';
 
@@ -175,12 +245,28 @@ async function loadInventory() {
             // Keep Inventory page focused on finished goods only.
             if (isRawMaterialItem(item) || RAW_CATEGORIES.includes(item.category)) return;
 
-            if (!item.imageUrl && item.name) {
-                const fallbackUrl = productImageMap.get(item.name.toLowerCase());
+            const variantLookupKey = buildVariantKey({
+                name: item.name || '',
+                category: item.productType || item.category || '',
+                pipeType: item.pipeType || '',
+                loadClass: item.loadClass || ''
+            });
+            const nameKey = normalizeText(item.name || '');
+            const nameLookupAllowed = nameKey && (productNameCountMap.get(nameKey) || 0) <= 1;
+            const matchedProduct = (
+                (item.productMasterId && productByMasterId.get(String(item.productMasterId))) ||
+                (variantLookupKey && productByVariantMap.get(variantLookupKey)) ||
+                (nameLookupAllowed ? productInfoMap.get(nameKey) : null)
+            );
+
+            if (!item.imageUrl && matchedProduct?.imageUrl) {
+                item.imageUrl = matchedProduct.imageUrl;
+            } else if (!item.imageUrl && item.name) {
+                const fallbackUrl = productImageMap.get(normalizeText(item.name));
                 if (fallbackUrl) item.imageUrl = fallbackUrl;
             }
             if (item.name) {
-                const info = productInfoMap.get(item.name.toLowerCase());
+                const info = matchedProduct || productInfoMap.get(normalizeText(item.name));
                 if (info) {
                     if (info.category && (!item.category || String(item.category).toLowerCase().includes('finished'))) {
                         item.category = info.category;
@@ -188,7 +274,7 @@ async function loadInventory() {
                     if (info.pipeType && !item.pipeType) item.pipeType = info.pipeType;
                     if (info.loadClass && !item.loadClass) item.loadClass = info.loadClass;
                 }
-                const meta = productMetaMap.get(item.name.toLowerCase());
+                const meta = matchedProduct || productMetaMap.get(normalizeText(item.name));
                 if (meta) {
                     if ((item.hsn || '') === '') item.hsn = meta.hsn || '';
                     item.gstRate = resolveGstRate(item.gstRate, meta.gstRate);
@@ -199,10 +285,57 @@ async function loadInventory() {
                 }
             }
 
+            const backfill = {};
+            if (matchedProduct?.productMasterId && !item.productMasterId) backfill.productMasterId = matchedProduct.productMasterId;
+            if (matchedProduct?.category) {
+                const currentCategory = normalizeText(item.category);
+                if (!currentCategory || currentCategory.includes('finished')) {
+                    backfill.category = matchedProduct.category;
+                }
+                if (!item.productType) backfill.productType = matchedProduct.category;
+            }
+            if (matchedProduct?.pipeType && normalizeText(item.pipeType) !== normalizeText(matchedProduct.pipeType)) {
+                backfill.pipeType = matchedProduct.pipeType;
+            }
+            if (matchedProduct?.loadClass && normalizeText(item.loadClass) !== normalizeText(matchedProduct.loadClass)) {
+                backfill.loadClass = matchedProduct.loadClass;
+            }
+            if (matchedProduct?.imageUrl && normalizeText(item.imageUrl) !== normalizeText(matchedProduct.imageUrl)) {
+                backfill.imageUrl = matchedProduct.imageUrl;
+            }
+            if (matchedProduct?.hsn && !String(item.hsn || '').trim()) backfill.hsn = matchedProduct.hsn;
+            if (matchedProduct?.gstRate && (!Number(item.gstRate) || Number(item.gstRate) <= 0)) backfill.gstRate = matchedProduct.gstRate;
+            if (matchedProduct?.sellingPrice && (!Number(item.sellingPrice) || Number(item.sellingPrice) <= 0)) backfill.sellingPrice = matchedProduct.sellingPrice;
+            if (Object.keys(backfill).length > 0) {
+                Object.assign(item, backfill);
+                pendingBackfills.push({ id: item.id, backfill });
+            }
+
             inventoryData.push(item);
             rowsHtml += createInventoryRow(item);
         });
         tbody.innerHTML = rowsHtml;
+
+        if (pendingBackfills.length > 0) {
+            let batch = db.batch();
+            let ops = 0;
+            const commitBatch = async () => {
+                if (ops === 0) return;
+                await batch.commit();
+                batch = db.batch();
+                ops = 0;
+            };
+            for (const row of pendingBackfills) {
+                const ref = db.collection('users').doc(businessId).collection('inventory').doc(row.id);
+                batch.set(ref, { ...row.backfill, updatedAt: new Date() }, { merge: true });
+                ops += 1;
+                if (ops >= 400) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await commitBatch();
+                }
+            }
+            await commitBatch();
+        }
 
         // Sync featured stock docs so landing/public products always reflect latest inventory changes.
         await syncFeaturedStockCollection(businessId, allInventoryItems);
@@ -470,7 +603,9 @@ async function toggleLandingFeature(item) {
     const contact = await getBusinessContact(businessId);
     let imageUrl = item.imageUrl || '';
     if (!imageUrl && item.name) {
-        imageUrl = productImageMap.get(item.name.toLowerCase()) || '';
+        const key = normalizeText(item.name);
+        const isUnique = (productNameCountMap.get(key) || 0) <= 1;
+        if (isUnique) imageUrl = productImageMap.get(key) || '';
     }
 
     try {
