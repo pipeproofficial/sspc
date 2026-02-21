@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sspc-v1.1.5';
+const CACHE_VERSION = 'sspc-v1.1.6';
 const OFFLINE_URL = 'offline.html';
 
 const APP_SHELL = [
