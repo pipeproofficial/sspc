@@ -1,8 +1,15 @@
 import { db, getPublicBusinessId } from './firebase-config.js';
 
 const grid = document.getElementById('landingStockGrid');
-const LANDING_PRODUCT_LIMIT = 4;
 let landingFeaturedUnsubscribe = null;
+
+function normalizeLandingCategory(item = {}) {
+    const raw = String(item.productCategory || item.category || item.type || '').toLowerCase();
+    if (raw.includes('rcc') || raw.includes('pipe')) return 'RCC Pipes';
+    if (raw.includes('septic')) return 'Septic Tanks';
+    if (raw.includes('water') && raw.includes('tank')) return 'Water Tanks';
+    return 'Other Products';
+}
 
 function sanitizePhone(value) {
     if (!value) return '';
@@ -73,7 +80,12 @@ function createStockCard(item, phone, whatsapp) {
     const img = item.imageUrl || 'factory-hero.png';
     const qty = item.quantity ?? 0;
     const unit = item.unit || 'pcs';
-    const category = item.category || item.type || 'Other';
+    const productCategory = item.productCategory || item.category || item.type || 'Other';
+    const pipeType = item.pipeType || '-';
+    const loadClass = item.loadClass || '-';
+    const categoryText = String(productCategory || '').toLowerCase();
+    const nameText = String(item.name || '').toLowerCase();
+    const isSeptic = categoryText.includes('septic') || nameText.includes('septic');
     const callLink = phone ? `tel:+${phone}` : '#';
     const waText = encodeURIComponent(`Hi, I want pricing for ${item.name}.`);
     const waLink = whatsapp ? `https://wa.me/${whatsapp}?text=${waText}` : '#';
@@ -86,7 +98,9 @@ function createStockCard(item, phone, whatsapp) {
                 </div>
                 <div class="stock-body">
                     <div class="stock-title">${item.name || 'Item'}</div>
-                    <div class="stock-qty">Category: <strong>${category}</strong></div>
+                    <div class="stock-qty">Category: <strong>${productCategory}</strong></div>
+                    ${isSeptic ? '' : `<div class="stock-qty">Pipe Type: <strong>${pipeType}</strong></div>`}
+                    ${isSeptic ? '' : `<div class="stock-qty">Load Class: <strong>${loadClass}</strong></div>`}
                     <div class="stock-qty">Available Qty: <strong>${qty}</strong></div>
                     <div class="stock-qty">Unit: <strong>${unit}</strong></div>
                     <div class="stock-quick compact">
@@ -136,13 +150,33 @@ async function loadLandingStock() {
                     renderEmpty('No featured stock available right now.');
                     return;
                 }
-                const cards = [];
+                const groups = new Map([
+                    ['RCC Pipes', []],
+                    ['Septic Tanks', []],
+                    ['Water Tanks', []],
+                    ['Other Products', []]
+                ]);
+
                 snapshot.forEach(doc => {
-                    if (cards.length < LANDING_PRODUCT_LIMIT) {
-                        cards.push(createStockCard(doc.data(), phone, whatsapp));
-                    }
+                    const item = doc.data() || {};
+                    const group = normalizeLandingCategory(item);
+                    if (!groups.has(group)) groups.set(group, []);
+                    groups.get(group).push(createStockCard(item, phone, whatsapp));
                 });
-                grid.innerHTML = cards.join('');
+
+                const sections = [];
+                groups.forEach((cards, title) => {
+                    if (!cards.length) return;
+                    sections.push(`
+                        <div class="col-12 mt-3">
+                            <h4 class="fw-bold mb-3">${title}</h4>
+                            <div class="row g-3">
+                                ${cards.join('')}
+                            </div>
+                        </div>
+                    `);
+                });
+                grid.innerHTML = sections.join('');
             }, (error) => {
                 console.error('Failed to subscribe landing stock', error);
                 renderEmpty('Failed to load stock.');
