@@ -18,11 +18,15 @@ const pmImageStatus = document.getElementById('pmImageStatus');
 const pmImageUrl = document.getElementById('pmImageUrl');
 const pmImageProgressWrap = document.getElementById('pmImageProgressWrap');
 const pmImageProgress = document.getElementById('pmImageProgress');
+const pmRecipeContainer = document.getElementById('pmRecipeContainer');
+const pmAddRecipeRowBtn = document.getElementById('pmAddRecipeRowBtn');
 
 let currentProductId = null;
 let currentMoldId = null;
 let currentLocationId = null;
 let pendingOptionType = null;
+let productMasterInventoryItems = [];
+let appDefaultGstRate = 0;
 
 const DEFAULT_PRODUCT_OPTIONS = {
     category: ['RCC Pipe', 'Septic Tank', 'Water Tank'],
@@ -60,6 +64,94 @@ function normalizeLocationType(type) {
         'Septic Assembly Area': 'Septic Tank Area'
     };
     return map[raw] || raw;
+}
+
+function isRawMaterialInventoryItem(item = {}) {
+    const category = (item.category || '').toString().trim().toLowerCase();
+    const name = (item.name || '').toString().trim().toLowerCase();
+    const source = (item.source || '').toString().trim().toLowerCase();
+
+    const blockedCategoryTokens = ['finished', 'rcc pipe', 'rcc pipes', 'septic', 'water tank', 'product', 'fg'];
+    if (blockedCategoryTokens.some(token => category.includes(token))) return false;
+    if (source === 'product_master') return false;
+
+    const rawCategoryTokens = ['raw', 'cement', 'sand', 'dust', 'aggregate', 'steel', 'fly ash', 'admixture', 'chemical'];
+    if (rawCategoryTokens.some(token => category.includes(token))) return true;
+
+    const rawNameTokens = ['cement', 'sand', 'dust', 'aggregate', 'steel', 'fly ash', 'admixture', 'chemical'];
+    return rawNameTokens.some(token => name.includes(token));
+}
+
+async function loadProductMasterInventory() {
+    const businessId = getBusinessId();
+    if (!businessId) return;
+    try {
+        const snap = await db.collection('users').doc(businessId).collection('inventory').get();
+        productMasterInventoryItems = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+        console.error('Failed to load inventory for product recipe', error);
+        productMasterInventoryItems = [];
+    }
+}
+
+function addProductRecipeRow(preSelectedId = '', preQty = '') {
+    if (!pmRecipeContainer) return;
+    const rowId = `pm-recipe-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const rawItems = (productMasterInventoryItems || []).filter(isRawMaterialInventoryItem);
+    const options = rawItems.map(item =>
+        `<option value="${item.id}" ${String(preSelectedId) === String(item.id) ? 'selected' : ''}>${item.name || item.id}${item.category ? ` [${item.category}]` : ''}</option>`
+    ).join('');
+    const html = `
+        <div class="row g-2 mb-2 align-items-end pm-recipe-row" id="${rowId}">
+            <div class="col-md-7">
+                <label class="form-label small">Raw Material</label>
+                <select class="form-select form-select-sm pm-recipe-material">
+                    <option value="">${rawItems.length ? 'Select Material...' : 'No raw materials found'}</option>
+                    ${options}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Quantity</label>
+                <input type="number" class="form-control form-control-sm pm-recipe-qty" min="0" step="0.01" value="${preQty || ''}">
+            </div>
+            <div class="col-md-1 d-grid">
+                <button type="button" class="btn btn-outline-danger btn-sm pm-recipe-remove-btn">x</button>
+            </div>
+        </div>`;
+    pmRecipeContainer.insertAdjacentHTML('beforeend', html);
+}
+
+function setProductRecipeRows(rows = []) {
+    if (!pmRecipeContainer) return;
+    pmRecipeContainer.innerHTML = '';
+    const validRows = (rows || []).filter((row) => {
+        const id = row?.id || row?.materialId || '';
+        const qty = parseFloat(row?.quantity || row?.qty || '0') || 0;
+        return id && qty > 0;
+    });
+    if (!validRows.length) {
+        addProductRecipeRow();
+        return;
+    }
+    validRows.forEach((row) => addProductRecipeRow(row.id || row.materialId || '', row.quantity || row.qty || ''));
+}
+
+function getProductRecipeRows() {
+    if (!pmRecipeContainer) return [];
+    const rows = [];
+    pmRecipeContainer.querySelectorAll('.pm-recipe-row').forEach((row) => {
+        const id = row.querySelector('.pm-recipe-material')?.value || '';
+        const qty = parseFloat(row.querySelector('.pm-recipe-qty')?.value || '0') || 0;
+        if (!id || qty <= 0) return;
+        const item = (productMasterInventoryItems || []).find(i => i.id === id);
+        rows.push({
+            id,
+            name: item?.name || 'Material',
+            unit: item?.unit || '',
+            quantity: qty
+        });
+    });
+    return rows;
 }
 
 function resolveProductCategory() {
@@ -292,6 +384,7 @@ async function saveProductOption() {
 
 document.addEventListener('DOMContentLoaded', async () => {
     await checkAuth();
+    await loadBusinessDefaults();
     await loadProductOptionSets();
 
     window.addEventListener('sectionChanged', (e) => {
@@ -304,6 +397,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (mmCreateBtn) mmCreateBtn.addEventListener('click', saveMoldMaster);
     if (lmCreateBtn) lmCreateBtn.addEventListener('click', saveLocationMaster);
     if (pmImageFile) pmImageFile.addEventListener('change', handleProductImageSelect);
+    if (pmAddRecipeRowBtn) pmAddRecipeRowBtn.addEventListener('click', () => addProductRecipeRow());
+    if (pmRecipeContainer) {
+        pmRecipeContainer.addEventListener('click', (event) => {
+            const btn = event.target.closest('.pm-recipe-remove-btn');
+            if (!btn) return;
+            const row = btn.closest('.pm-recipe-row');
+            if (row) row.remove();
+            if (!pmRecipeContainer.querySelector('.pm-recipe-row')) addProductRecipeRow();
+        });
+    }
     const categorySelect = document.getElementById('pmCategoryNew');
     if (categorySelect) {
         categorySelect.addEventListener('change', syncProductMasterCategoryFields);
@@ -344,8 +447,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const productMasterModal = document.getElementById('productMasterModal');
     if (productMasterModal) {
         productMasterModal.addEventListener('show.bs.modal', async () => {
+            await loadBusinessDefaults();
             await loadProductOptionSets();
+            await loadProductMasterInventory();
+            if (!currentProductId) setProductRecipeRows([]);
             await loadProducts();
+        });
+        productMasterModal.addEventListener('hidden.bs.modal', () => {
+            currentProductId = null;
+            productForm?.reset();
+            syncProductMasterCategoryFields();
+            resetProductImageUI();
+            setProductRecipeRows([]);
         });
     }
 
@@ -353,6 +466,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadAllMasters() {
+    await loadBusinessDefaults();
     await loadProductOptionSets();
     await Promise.all([loadProducts(), loadMolds(), loadLocations()]);
 }
@@ -360,6 +474,29 @@ async function loadAllMasters() {
 function getBusinessId() {
     const user = JSON.parse(localStorage.getItem('user'));
     return user?.businessId || user?.uid;
+}
+
+function resolveGstRate(value, fallback = appDefaultGstRate) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+    const fb = Number(fallback);
+    return Number.isFinite(fb) ? fb : 0;
+}
+
+async function loadBusinessDefaults() {
+    const businessId = getBusinessId();
+    if (!businessId) {
+        appDefaultGstRate = 0;
+        return;
+    }
+    try {
+        const doc = await db.collection('users').doc(businessId).collection('settings').doc('business').get();
+        const data = doc.exists ? (doc.data() || {}) : {};
+        appDefaultGstRate = Number(data.gstRate ?? 0) || 0;
+    } catch (error) {
+        console.warn('Failed to load business defaults for Product Master', error);
+        appDefaultGstRate = 0;
+    }
 }
 
 async function loadProducts() {
@@ -377,9 +514,11 @@ async function loadProducts() {
         tbody.innerHTML = '';
         snap.forEach(doc => {
             const p = doc.data();
-            const cost = (p.costPrice ?? 0).toLocaleString();
             const price = (p.sellingPrice ?? 0).toLocaleString();
-            const priceSummary = `₹${cost} / ₹${price}`;
+            const labour = (p.labourCostPerProduct ?? 0).toLocaleString();
+            const gstRate = resolveGstRate(p.gstRate);
+            const recipeCount = Array.isArray(p.rawMaterials) ? p.rawMaterials.length : 0;
+            const priceSummary = `₹${price} | GST ${gstRate}% | Labour ₹${labour}${recipeCount ? ` | RM ${recipeCount}` : ''}`;
             const imageCell = p.imageUrl
                 ? `<a href="${p.imageUrl}" target="_blank" class="d-inline-block" title="View Image">
                         <img src="${p.imageUrl}" alt="Product" style="width: 40px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid rgba(0,0,0,0.1);">
@@ -476,18 +615,17 @@ async function saveProductMaster() {
     if (!businessId) return;
     const categoryVal = resolveProductCategory();
     if (!categoryVal) return showAlert('danger', 'Product category required');
-    const autoHsn = categoryVal && categoryVal.toLowerCase().includes('septic') ? '6810' : '6810';
-    const hsnVal = (document.getElementById('pmHsnNew')?.value || '').trim() || autoHsn;
+    const rawMaterials = getProductRecipeRows();
     const data = {
         category: categoryVal,
         name: document.getElementById('pmNameNew').value.trim(),
         pipeType: (document.getElementById('pmPipeTypeNew').value || '').trim(),
         loadClass: (document.getElementById('pmLoadClassNew').value || '').trim(),
         unit: (document.getElementById('pmUnitNew').value || 'Nos').trim(),
-        costPrice: parseFloat(document.getElementById('pmCostPriceNew').value) || 0,
         sellingPrice: parseFloat(document.getElementById('pmSellingPriceNew').value) || 0,
-        hsn: hsnVal,
-        gstRate: parseFloat(document.getElementById('pmGstRateNew')?.value) || 0,
+        gstRate: resolveGstRate(null),
+        labourCostPerProduct: parseFloat(document.getElementById('pmLabourCostPerProductNew')?.value || '0') || 0,
+        rawMaterials,
         status: 'Active',
         imageUrl: pmImageUrl ? (pmImageUrl.value || '') : '',
         updatedAt: new Date()
@@ -505,6 +643,7 @@ async function saveProductMaster() {
         productForm.reset();
         syncProductMasterCategoryFields();
         resetProductImageUI();
+        setProductRecipeRows([]);
         showAlert('success', 'Product saved');
         loadProducts();
     } catch (e) {
@@ -607,6 +746,7 @@ window.editProductMaster = async (id) => {
     const businessId = getBusinessId();
     const doc = await db.collection('users').doc(businessId).collection('product_master').doc(id).get();
     if (!doc.exists) return;
+    await loadProductMasterInventory();
     const p = doc.data();
     currentProductId = id;
     const categoryRaw = p.category || 'RCC Pipe';
@@ -629,12 +769,10 @@ window.editProductMaster = async (id) => {
         unit: p.unit || 'Nos'
     });
     document.getElementById('pmNameNew').value = p.name || '';
-    document.getElementById('pmCostPriceNew').value = p.costPrice ?? 0;
     document.getElementById('pmSellingPriceNew').value = p.sellingPrice ?? 0;
-    const hsnInput = document.getElementById('pmHsnNew');
-    if (hsnInput) hsnInput.value = p.hsn || '';
-    const gstInput = document.getElementById('pmGstRateNew');
-    if (gstInput) gstInput.value = p.gstRate ?? 0;
+    const labourInput = document.getElementById('pmLabourCostPerProductNew');
+    if (labourInput) labourInput.value = p.labourCostPerProduct ?? p.labourRatePerProduct ?? 0;
+    setProductRecipeRows(p.rawMaterials || p.ingredients || []);
     syncProductMasterCategoryFields();
     setProductImageUI(p.imageUrl || '');
 };
