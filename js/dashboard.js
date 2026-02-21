@@ -16,6 +16,10 @@ const notificationMenu = document.getElementById('notificationMenu');
 const profitReportBtn = document.getElementById('profitReportBtn');
 const darkModeToggle = document.getElementById('darkModeToggle');
 const themeToggleBtn = document.getElementById('themeToggle');
+const revenuePeriodFilter = document.getElementById('revenuePeriodFilter');
+const exportRevenueMomentumCsvBtn = document.getElementById('exportRevenueMomentumCsvBtn');
+const exportRevenueMomentumPdfBtn = document.getElementById('exportRevenueMomentumPdfBtn');
+const revenueMomentumSubtitle = document.getElementById('revenueMomentumSubtitle');
 
 function ownerGateTrustKey(uid) {
     return `sspc_owner_gate_trust_${uid}`;
@@ -29,7 +33,7 @@ function hasOwnerGateTrust(uid) {
 // Chart Variables
 let revenueChart;
 let teamMembersCache = [];
-const RAW_CATEGORIES = ['Raw Materials', 'Cement', 'Sand', 'Aggregate', 'Steel', 'Fly Ash', 'Admixtures', 'Chemicals'];
+const RAW_CATEGORIES = ['Raw Materials', 'Cement', 'Sand', 'Dust', 'Aggregate', 'Steel', 'Fly Ash', 'Admixtures', 'Chemicals'];
 
 // Notification State
 let notificationState = { inventory: [], vehicles: [] };
@@ -37,6 +41,7 @@ let notificationUnsubscribers = [];
 let notificationsBusinessId = '';
 let productMasterCategoryCache = new Map();
 let productMasterCategoryCacheBusinessId = '';
+let revenueMomentumState = { period: 'monthly', labels: [], data: [] };
 
 // Initialize Dashboard
 document.addEventListener('DOMContentLoaded', async () => {
@@ -550,10 +555,139 @@ function updateStatElement(elementId, value) {
     });
 }
 
+function getRevenuePeriodConfig(period = 'monthly') {
+    switch (period) {
+        case 'daily':
+            return { days: 14, subtitle: 'Paid invoices by day (last 14 days)' };
+        case 'weekly':
+            return { days: 84, subtitle: 'Paid invoices by week (last 12 weeks)' };
+        case 'yearly':
+            return { days: 365 * 5, subtitle: 'Paid invoices by year (last 5 years)' };
+        case 'monthly':
+        default:
+            return { days: 365, subtitle: 'Paid invoices by month (last 12 months)' };
+    }
+}
+
+function getRevenueChartStyle(period = 'monthly') {
+    if (period === 'daily') {
+        return {
+            type: 'line',
+            tension: 0.35,
+            pointRadius: 3,
+            fill: true
+        };
+    }
+    return {
+        type: 'bar',
+        tension: 0,
+        pointRadius: 0,
+        fill: false
+    };
+}
+
+function toJsDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value?.toDate === 'function') return value.toDate();
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function getIsoWeek(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    return { year: d.getUTCFullYear(), week: weekNo };
+}
+
+function buildRevenueBucket(date, period = 'monthly') {
+    const d = toJsDate(date);
+    if (!d) return { key: 'unknown', label: 'Unknown' };
+    if (period === 'daily') {
+        const key = d.toISOString().slice(0, 10);
+        return { key, label: d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' }) };
+    }
+    if (period === 'weekly') {
+        const wk = getIsoWeek(d);
+        const key = `${wk.year}-W${String(wk.week).padStart(2, '0')}`;
+        return { key, label: `W${wk.week} ${wk.year}` };
+    }
+    if (period === 'yearly') {
+        const y = d.getFullYear();
+        return { key: String(y), label: String(y) };
+    }
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return { key, label: d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) };
+}
+
+async function loadRevenueMomentumData(period = 'monthly') {
+    const user = JSON.parse(localStorage.getItem('user'));
+    if (!user) return { period, labels: [], data: [] };
+    const businessId = user.businessId || user.uid;
+    const config = getRevenuePeriodConfig(period);
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - config.days);
+
+    const snapshot = await db.collection('users').doc(businessId)
+        .collection('transactions')
+        .where('type', '==', 'Invoice')
+        .where('date', '>=', fromDate)
+        .orderBy('date', 'asc')
+        .get();
+
+    const map = new Map();
+    snapshot.forEach((doc) => {
+        const t = doc.data() || {};
+        if ((t.status || '') !== 'Paid') return;
+        const amount = Number(t.amount || 0);
+        if (!Number.isFinite(amount)) return;
+        const bucket = buildRevenueBucket(t.date, period);
+        const prev = map.get(bucket.key) || { label: bucket.label, value: 0 };
+        map.set(bucket.key, { label: bucket.label, value: prev.value + amount });
+    });
+
+    const keys = Array.from(map.keys()).sort((a, b) => a.localeCompare(b));
+    const labels = keys.map((k) => map.get(k).label);
+    const data = keys.map((k) => map.get(k).value);
+    return { period, labels, data };
+}
+
+function exportRevenueMomentumCSV() {
+    if (!revenueMomentumState.labels.length) {
+        alert('No revenue data to export.');
+        return;
+    }
+    const headers = ['Period', 'Revenue'];
+    const rows = revenueMomentumState.labels.map((label, i) => [label, revenueMomentumState.data[i] || 0]);
+    downloadCSV(`revenue_momentum_${revenueMomentumState.period}_${new Date().toISOString().split('T')[0]}.csv`, headers, rows);
+}
+
+function exportRevenueMomentumPDF() {
+    if (!revenueMomentumState.labels.length) {
+        alert('No revenue data to export.');
+        return;
+    }
+    const headers = ['Period', 'Revenue'];
+    const rows = revenueMomentumState.labels.map((label, i) => [label, `₹${Number(revenueMomentumState.data[i] || 0).toLocaleString()}`]);
+    downloadPDF(
+        `revenue_momentum_${revenueMomentumState.period}_${new Date().toISOString().split('T')[0]}.pdf`,
+        `Revenue Momentum (${revenueMomentumState.period})`,
+        headers,
+        rows,
+        { orientation: 'portrait' }
+    );
+}
+
 // Initialize Chart with Real Data
 async function initializeChart() {
     const ctx = document.getElementById('revenueChart');
     if (!ctx) return;
+    if (revenueChart) {
+        revenueChart.destroy();
+        revenueChart = null;
+    }
 
     const user = JSON.parse(localStorage.getItem('user'));
     if (!user) return;
@@ -564,49 +698,35 @@ async function initializeChart() {
         return; // Don't load chart data
     }
 
-    let labels = [];
-    let data = [];
-
-    if (user) {
-        try {
-            // Get last 6 months of invoices
-            const sixMonthsAgo = new Date();
-            sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
-            const snapshot = await db.collection('users').doc(businessId)
-                .collection('transactions')
-                .where('type', '==', 'Invoice')
-                .where('date', '>=', sixMonthsAgo)
-                .orderBy('date', 'asc')
-                .get();
-
-            const monthlyData = {};
-            snapshot.forEach(doc => {
-                const t = doc.data();
-                const date = t.date.toDate ? t.date.toDate() : new Date(t.date);
-                const monthYear = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-                monthlyData[monthYear] = (monthlyData[monthYear] || 0) + (t.amount || 0);
-            });
-
-            labels = Object.keys(monthlyData);
-            data = Object.values(monthlyData);
-        } catch (e) {
-            console.error("Error loading chart data", e);
-        }
+    const period = revenuePeriodFilter?.value || revenueMomentumState.period || 'monthly';
+    revenueMomentumState.period = period;
+    const chartStyle = getRevenueChartStyle(period);
+    try {
+        revenueMomentumState = await loadRevenueMomentumData(period);
+        const subtitle = getRevenuePeriodConfig(period).subtitle;
+        if (revenueMomentumSubtitle) revenueMomentumSubtitle.textContent = subtitle;
+    } catch (e) {
+        console.error('Error loading chart data', e);
+        revenueMomentumState = { period, labels: [], data: [] };
     }
 
     revenueChart = new Chart(ctx.getContext('2d'), {
-        type: 'line',
+        type: chartStyle.type,
         data: {
-            labels: labels.length ? labels : ['No Data'],
+            labels: revenueMomentumState.labels.length ? revenueMomentumState.labels : ['No Data'],
             datasets: [{
                 label: 'Revenue',
-                data: data.length ? data : [0],
+                data: revenueMomentumState.data.length ? revenueMomentumState.data : [0],
                 borderColor: '#3498db',
-                backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                backgroundColor: chartStyle.type === 'bar'
+                    ? 'rgba(52, 152, 219, 0.75)'
+                    : 'rgba(52, 152, 219, 0.15)',
                 borderWidth: 2,
-                fill: true,
-                tension: 0.4
+                fill: chartStyle.fill,
+                tension: chartStyle.tension,
+                pointRadius: chartStyle.pointRadius,
+                pointHoverRadius: chartStyle.pointRadius ? chartStyle.pointRadius + 1 : 3,
+                maxBarThickness: chartStyle.type === 'bar' ? 42 : undefined
             }]
         },
         options: {
@@ -645,14 +765,6 @@ async function initializeChart() {
 
 // Setup Event Listeners
 function setupEventListeners() {
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
-    }
-
-    if (mobileLogoutBtn) {
-        mobileLogoutBtn.addEventListener('click', handleLogout);
-    }
-
     // Mobile Sidebar Toggle
     if (sidebarToggle) {
         sidebarToggle.addEventListener('click', () => {
@@ -678,6 +790,18 @@ function setupEventListeners() {
     const saveTeamMemberBtn = document.getElementById('saveTeamMemberBtn');
     if (saveTeamMemberBtn) {
         saveTeamMemberBtn.addEventListener('click', saveTeamMember);
+    }
+
+    if (revenuePeriodFilter) {
+        revenuePeriodFilter.addEventListener('change', () => {
+            initializeChart();
+        });
+    }
+    if (exportRevenueMomentumCsvBtn) {
+        exportRevenueMomentumCsvBtn.addEventListener('click', exportRevenueMomentumCSV);
+    }
+    if (exportRevenueMomentumPdfBtn) {
+        exportRevenueMomentumPdfBtn.addEventListener('click', exportRevenueMomentumPDF);
     }
 }
 
@@ -750,10 +874,16 @@ function setupNotifications(businessId) {
 }
 
 function mapFeaturedStockDoc(item = {}, fallbackCategory = '') {
-    const resolvedCategory = item.category || item.type || fallbackCategory || 'Other';
+    const fallbackInfo = (fallbackCategory && typeof fallbackCategory === 'object')
+        ? fallbackCategory
+        : { category: fallbackCategory || '', pipeType: '', loadClass: '' };
+    const resolvedCategory = fallbackInfo.category || item.productCategory || item.category || item.type || 'Other';
     return {
         name: item.name || 'Item',
         category: resolvedCategory,
+        productCategory: fallbackInfo.category || item.productCategory || '',
+        pipeType: fallbackInfo.pipeType || item.pipeType || '',
+        loadClass: fallbackInfo.loadClass || item.loadClass || '',
         type: item.type || '',
         description: item.description || '',
         sku: item.sku || '',
@@ -773,9 +903,14 @@ async function ensureProductMasterCategoryCache(businessId) {
     const snap = await db.collection('users').doc(businessId).collection('product_master').get();
     snap.forEach(doc => {
         const p = doc.data() || {};
-        const key = (p.name || '').toLowerCase().trim();
-        const category = p.category || p.productCategory || '';
-        if (key && category) productMasterCategoryCache.set(key, category);
+        const keys = [p.name, p.productName].map(v => (v || '').toLowerCase().trim()).filter(Boolean);
+        if (!keys.length) return;
+        const info = {
+            category: p.category || p.productCategory || '',
+            pipeType: p.pipeType || '',
+            loadClass: p.loadClass || ''
+        };
+        keys.forEach((key) => productMasterCategoryCache.set(key, info));
     });
 }
 
@@ -794,7 +929,7 @@ async function syncPublicFeaturedStockFromChanges(businessId, changes = []) {
         } else {
             const item = change.doc.data() || {};
             const nameKey = (item.name || '').toLowerCase().trim();
-            const fallbackCategory = nameKey ? (productMasterCategoryCache.get(nameKey) || '') : '';
+            const fallbackCategory = nameKey ? (productMasterCategoryCache.get(nameKey) || {}) : {};
             if (item.showOnLanding) {
                 batch.set(featuredRef, mapFeaturedStockDoc(item, fallbackCategory), { merge: true });
             } else {
@@ -1303,8 +1438,3 @@ async function fetchPostOfficeByPincode(pincode) {
 }
 
 export { getPostOfficeBaseUrl, fetchPostOfficeByPincode };
-
-
-
-
-
