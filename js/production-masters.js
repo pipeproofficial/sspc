@@ -159,6 +159,18 @@ function resolveProductCategory() {
     return (categorySelect?.value || '').trim();
 }
 
+function normalizeText(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function formatProductIdentityLabel(data = {}) {
+    const name = data.name || data.productName || 'Product';
+    const category = data.category || data.productCategory || '-';
+    const pipeType = data.pipeType || '-';
+    const loadClass = data.loadClass || '-';
+    return `${name} | ${category} | ${pipeType} | ${loadClass}`;
+}
+
 function normalizeOptionArray(value) {
     if (!Array.isArray(value)) return [];
     return Array.from(new Set(value.map(v => String(v || '').trim()).filter(Boolean)));
@@ -526,9 +538,9 @@ async function loadProducts() {
                 : '<span class="text-muted">-</span>';
             tbody.innerHTML += `
                 <tr>
-                    <td>${p.name || '-'}</td>
+                    <td>${formatProductIdentityLabel(p)}</td>
                     <td>${imageCell}</td>
-                    <td>${p.category || '-'}</td>
+                    <td>${p.category || p.productCategory || '-'}</td>
                     <td>${priceSummary}</td>
                     <td>
                         <button class="btn btn-sm btn-outline-primary" onclick="window.editProductMaster('${doc.id}')">Edit</button>
@@ -633,6 +645,21 @@ async function saveProductMaster() {
     if (!data.name) return showAlert('danger', 'Product name required');
 
     try {
+        const duplicateSnap = await db.collection('users').doc(businessId).collection('product_master')
+            .where('name', '==', data.name)
+            .get();
+        const duplicate = duplicateSnap.docs.find((doc) => {
+            if (currentProductId && doc.id === currentProductId) return false;
+            const p = doc.data() || {};
+            return normalizeText(p.name) === normalizeText(data.name)
+                && normalizeText(p.category || p.productCategory) === normalizeText(data.category)
+                && normalizeText(p.pipeType) === normalizeText(data.pipeType)
+                && normalizeText(p.loadClass) === normalizeText(data.loadClass);
+        });
+        if (duplicate) {
+            return showAlert('danger', `Duplicate product variant: ${formatProductIdentityLabel(data)}`);
+        }
+
         if (currentProductId) {
             await db.collection('users').doc(businessId).collection('product_master').doc(currentProductId).update(data);
             currentProductId = null;
