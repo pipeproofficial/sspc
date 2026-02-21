@@ -4,6 +4,10 @@ import { showAlert } from './auth.js';
 
 const productionTablePipes = document.getElementById('productionTablePipes');
 const productionTableSeptic = document.getElementById('productionTableSeptic');
+const productionPipesSelectAll = document.getElementById('productionPipesSelectAll');
+const productionSepticSelectAll = document.getElementById('productionSepticSelectAll');
+const deleteSelectedPipesBtn = document.getElementById('deleteSelectedPipesBtn');
+const deleteSelectedSepticBtn = document.getElementById('deleteSelectedSepticBtn');
 const productionSearch = document.getElementById('productionSearch');
 const productionStageFilter = document.getElementById('productionStageFilter');
 const productionDateFrom = document.getElementById('productionDateFrom');
@@ -26,6 +30,8 @@ const exportProductionCsvBtn = document.getElementById('exportProductionCsvBtn')
 const prodMoldSelect = document.getElementById('prodMoldNumber');
 const prodCastingLocationSelect = document.getElementById('prodCastingLocation');
 const prodProductMasterSelect = document.getElementById('prodProductMaster');
+const addProductionLineBtn = document.getElementById('addProductionLineBtn');
+const productionMultiLines = document.getElementById('productionMultiLines');
 const septicAllocationModal = document.getElementById('septicAllocationModal');
 const septicAllocationQtyInput = document.getElementById('septicAllocationQty');
 const septicAllocationProductSelect = document.getElementById('septicAllocationProduct');
@@ -85,6 +91,46 @@ let currentCompleteRunId = null;
 let currentLabourLedgerRunId = null;
 let labourPayablesAll = [];
 let showCompletedRunsOnly = false;
+let appDefaultGstRate = 0;
+
+function resolveGstRate(value, fallback = appDefaultGstRate) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+    const fb = Number(fallback);
+    return Number.isFinite(fb) ? fb : 0;
+}
+
+function resolveHsn(value, ...fallbacks) {
+    const candidates = [value, ...fallbacks];
+    for (const candidate of candidates) {
+        const normalized = String(candidate ?? '').trim();
+        if (normalized) return normalized;
+    }
+    return '';
+}
+
+function inferHsnForFinishedGood(name = '', category = '') {
+    const text = `${name || ''} ${category || ''}`.toLowerCase();
+    if (!text.trim()) return '';
+    if (/(rcc|pipe|septic|tank|manhole|concrete|cement)/.test(text)) return '6810';
+    if (/(steel|tmt|bar|rod)/.test(text)) return '7214';
+    return '';
+}
+
+async function loadBusinessDefaults(businessId) {
+    if (!businessId) {
+        appDefaultGstRate = 0;
+        return;
+    }
+    try {
+        const doc = await db.collection('users').doc(businessId).collection('settings').doc('business').get();
+        const data = doc.exists ? (doc.data() || {}) : {};
+        appDefaultGstRate = Number(data.gstRate ?? 0) || 0;
+    } catch (error) {
+        console.warn('Failed to load production business defaults', error);
+        appDefaultGstRate = 0;
+    }
+}
 
 function normalizeLocationType(type) {
     const raw = (type || '').trim();
@@ -109,7 +155,7 @@ window.completeCuring = async (id) => {
     if (flow.onCuringQty <= 0) {
         return showAlert('warning', 'No quantity is currently on curing to complete.');
     }
-    if (completeBatchIdInput) completeBatchIdInput.value = getRunDayLabel(run);
+    if (completeBatchIdInput) completeBatchIdInput.value = run.batchId || getRunBatchLabel(run);
     if (completePassedQtyInput) {
         completePassedQtyInput.value = flow.onCuringQty;
         completePassedQtyInput.max = String(flow.onCuringQty);
@@ -134,7 +180,7 @@ window.startCuring = async (id) => {
         return showAlert('warning', 'Curing flow is not applicable for septic assembly runs.');
     }
     currentCuringRunId = id;
-    if (curingBatchIdInput) curingBatchIdInput.value = getRunDayLabel(run);
+    if (curingBatchIdInput) curingBatchIdInput.value = run.batchId || getRunBatchLabel(run);
     const producedQty = Number(run.quantityProduced || 0);
     const movedQty = Number(run.curingQty || 0);
     const waitingQty = Math.max(0, producedQty - movedQty);
@@ -189,6 +235,8 @@ window.editProductionRun = async (id) => {
     if (!run) return;
     currentEditId = id;
     await openProductionModal();
+    if (productionMultiLines) productionMultiLines.innerHTML = '';
+    if (addProductionLineBtn) addProductionLineBtn.disabled = true;
     document.getElementById('productionDate').valueAsDate = run.date?.toDate ? run.date.toDate() : new Date();
     document.getElementById('produceQuantity').value = run.quantityProduced || 0;
     if (prodProductMasterSelect) {
@@ -228,6 +276,8 @@ window.editProductionRun = async (id) => {
 
 document.addEventListener('DOMContentLoaded', async () => {
     await checkAuth();
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    await loadBusinessDefaults(user.businessId || user.uid);
     loadProductionHistory();
 
     window.addEventListener('sectionChanged', (e) => {
@@ -249,6 +299,36 @@ document.addEventListener('DOMContentLoaded', async () => {
             applyProductionFilters();
         });
     }
+    if (productionPipesSelectAll) {
+        productionPipesSelectAll.addEventListener('change', () => {
+            const cbs = productionTablePipes?.querySelectorAll('.prod-run-cb') || [];
+            cbs.forEach(cb => { cb.checked = productionPipesSelectAll.checked; });
+            updateProductionSelectionButtons();
+        });
+    }
+    if (productionSepticSelectAll) {
+        productionSepticSelectAll.addEventListener('change', () => {
+            const cbs = productionTableSeptic?.querySelectorAll('.prod-run-cb') || [];
+            cbs.forEach(cb => { cb.checked = productionSepticSelectAll.checked; });
+            updateProductionSelectionButtons();
+        });
+    }
+    if (deleteSelectedPipesBtn) {
+        deleteSelectedPipesBtn.addEventListener('click', () => deleteSelectedProductionRuns('pipes'));
+    }
+    if (deleteSelectedSepticBtn) {
+        deleteSelectedSepticBtn.addEventListener('click', () => deleteSelectedProductionRuns('septic'));
+    }
+    if (productionTablePipes) {
+        productionTablePipes.addEventListener('change', (e) => {
+            if (e.target.classList.contains('prod-run-cb')) updateProductionSelectionButtons();
+        });
+    }
+    if (productionTableSeptic) {
+        productionTableSeptic.addEventListener('change', (e) => {
+            if (e.target.classList.contains('prod-run-cb')) updateProductionSelectionButtons();
+        });
+    }
 
     if (addIngredientBtn) {
         addIngredientBtn.addEventListener('click', () => addIngredientRow());
@@ -261,6 +341,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (document.getElementById('produceQuantity')) {
         document.getElementById('produceQuantity').addEventListener('input', (e) => {
             if (labourQtyInput) labourQtyInput.value = e.target.value || '0';
+            rescaleRecipeRowsForSingleRun();
             syncProductionLabourAmount();
             calculateCost();
         });
@@ -434,6 +515,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (prodProductMasterSelect) {
         prodProductMasterSelect.addEventListener('change', applyProductMasterSelection);
     }
+    if (addProductionLineBtn) {
+        addProductionLineBtn.addEventListener('click', () => addProductionLineRow());
+    }
+    if (productionMultiLines) {
+        productionMultiLines.addEventListener('click', (e) => {
+            const btn = e.target.closest('.production-line-remove-btn');
+            if (!btn) return;
+            const row = btn.closest('.production-line-row');
+            if (row) row.remove();
+        });
+        productionMultiLines.addEventListener('change', (e) => {
+            const select = e.target.closest('.production-line-product');
+            if (!select) return;
+            const row = select.closest('.production-line-row');
+            if (!row) return;
+            const labourRateInput = row.querySelector('.production-line-labour-rate');
+            if (!labourRateInput) return;
+            labourRateInput.value = getProductDefaultLabourRate(select.value);
+        });
+    }
 
     if (exportProductionCsvBtn) {
         exportProductionCsvBtn.addEventListener('click', exportProductionCSV);
@@ -548,11 +649,12 @@ async function loadProductionHistory() {
     const user = JSON.parse(localStorage.getItem('user'));
     if (!user || !productionTablePipes || !productionTableSeptic) return;
     const businessId = user.businessId || user.uid;
+    await loadBusinessDefaults(businessId);
 
     const pipesBody = productionTablePipes.querySelector('tbody');
     const septicBody = productionTableSeptic.querySelector('tbody');
-    pipesBody.innerHTML = '<tr><td colspan="6" class="text-center">Loading...</td></tr>';
-    septicBody.innerHTML = '<tr><td colspan="6" class="text-center">Loading...</td></tr>';
+    pipesBody.innerHTML = '<tr><td colspan="7" class="text-center">Loading...</td></tr>';
+    septicBody.innerHTML = '<tr><td colspan="7" class="text-center">Loading...</td></tr>';
 
     try {
         await loadProductionMasters(businessId);
@@ -569,10 +671,11 @@ async function loadProductionHistory() {
 
         if (snapshot.empty) {
             updateCuringStats([]);
-            pipesBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No pipe production records found</td></tr>';
-            septicBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No septic assembly records found</td></tr>';
+            pipesBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No pipe production records found</td></tr>';
+            septicBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No septic assembly records found</td></tr>';
             labourPayablesAll = [];
             renderLabourPaymentTracker([], []);
+            updateProductionSelectionButtons();
             return;
         }
 
@@ -590,10 +693,11 @@ async function loadProductionHistory() {
         applyProductionFilters();
     } catch (error) {
         console.error('Error loading production history:', error);
-        pipesBody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading data</td></tr>';
-        septicBody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading data</td></tr>';
+        pipesBody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading data</td></tr>';
+        septicBody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading data</td></tr>';
         labourPayablesAll = [];
         renderLabourPaymentTracker([], []);
+        updateProductionSelectionButtons();
     }
 }
 
@@ -653,10 +757,10 @@ function renderProductionRows(runs, user) {
     });
 
     if (!pipeRuns.length) {
-        pipesBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">${showCompletedRunsOnly ? 'No completed pipe production records found' : 'No running pipe production records found'}</td></tr>`;
+        pipesBody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">${showCompletedRunsOnly ? 'No completed pipe production records found' : 'No running pipe production records found'}</td></tr>`;
     }
     if (!septicRuns.length) {
-        septicBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">${showCompletedRunsOnly ? 'No completed septic assembly records found' : 'No running septic assembly records found'}</td></tr>`;
+        septicBody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">${showCompletedRunsOnly ? 'No completed septic assembly records found' : 'No running septic assembly records found'}</td></tr>`;
     }
 
     const allRuns = [...pipeRuns, ...septicRuns];
@@ -734,6 +838,7 @@ function renderProductionRows(runs, user) {
 
         const mainRow = `
             <tr>
+                <td><input type="checkbox" class="form-check-input prod-run-cb" data-id="${data.id}" ${canDelete ? '' : 'disabled'}></td>
                 <td>${dateCell}</td>
                 <td class="fw-bold text-primary">${data.finishedGoodName || '-'}${productMeta}${sourceText}</td>
                 <td>${qtyCell}</td>
@@ -778,6 +883,19 @@ function getRunDayLabel(runOrDate) {
     return dt.toLocaleDateString(undefined, { weekday: 'long' });
 }
 
+function getWeekOfMonth(runOrDate) {
+    const dt = runOrDate?.date ? toJsDate(runOrDate.date) : toJsDate(runOrDate);
+    if (!dt) return null;
+    return Math.floor((dt.getDate() - 1) / 7) + 1;
+}
+
+function getRunBatchLabel(runOrDate) {
+    const day = getRunDayLabel(runOrDate);
+    const week = getWeekOfMonth(runOrDate);
+    if (day === '-') return '-';
+    return week ? `${day} W${week}` : day;
+}
+
 function syncProductionLabourAmount() {
     if (!labourCostInput) return;
     const qty = parseFloat(labourQtyInput?.value || '0') || 0;
@@ -788,11 +906,11 @@ function syncProductionLabourAmount() {
 function updateCompletedToggleButton() {
     if (!toggleCompletedRunsBtn) return;
     if (showCompletedRunsOnly) {
-        toggleCompletedRunsBtn.innerHTML = '<i class="fas fa-list me-1"></i> View Running';
+        toggleCompletedRunsBtn.innerHTML = '<i class="fas fa-list me-1"></i> Running';
         toggleCompletedRunsBtn.classList.remove('btn-outline-dark');
         toggleCompletedRunsBtn.classList.add('btn-dark');
     } else {
-        toggleCompletedRunsBtn.innerHTML = '<i class="fas fa-eye me-1"></i> View Completed';
+        toggleCompletedRunsBtn.innerHTML = '<i class="fas fa-eye me-1"></i> Completed';
         toggleCompletedRunsBtn.classList.remove('btn-dark');
         toggleCompletedRunsBtn.classList.add('btn-outline-dark');
     }
@@ -837,7 +955,7 @@ function renderWorkflowRow(run, flow, stage) {
 
     return `
         <tr class="production-workflow-row">
-            <td colspan="6">
+            <td colspan="7">
                 <div class="run-workflow-wrap">
                     <div class="run-workflow-head">
                         <span class="run-workflow-title"><i class="fas fa-diagram-project me-1"></i>Workflow Progress</span>
@@ -986,7 +1104,10 @@ async function loadProductionMasters(businessId) {
 
         moldMasterItems = moldSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         locationMasterItems = locationSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        productMasterItems = productSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        productMasterItems = productSnap.docs.map(doc => {
+            const data = doc.data() || {};
+            return { id: doc.id, ...data, gstRate: resolveGstRate(data.gstRate) };
+        });
 
         populateMoldSelect();
         populateLocationSelects();
@@ -1061,6 +1182,7 @@ function populateProductMasterSelect() {
         option.textContent = category ? `${name} (${category})` : name;
         prodProductMasterSelect.appendChild(option);
     });
+    refreshProductionLineOptions();
 }
 
 function populateSepticAllocationLocations() {
@@ -1120,6 +1242,10 @@ function applyProductMasterSelection() {
     const p = productMasterItems.find(item => item.id === id);
     if (!p) {
         if (productDetailsDiv) productDetailsDiv.textContent = '';
+        applyProductRawMaterialsToRun(null);
+        if (labourRatePerProductInput) labourRatePerProductInput.value = '0';
+        syncProductionLabourAmount();
+        calculateCost();
         return;
     }
     const name = p.name || p.productName || '';
@@ -1127,7 +1253,79 @@ function applyProductMasterSelection() {
     const pipeType = p.pipeType || '';
     const loadClass = p.loadClass || '';
     const details = [category, pipeType, loadClass].filter(Boolean).join(' | ');
+    applyProductRawMaterialsToRun(p);
+    const labourRate = parseFloat(p.labourCostPerProduct ?? p.labourRatePerProduct ?? 0) || 0;
+    if (labourRatePerProductInput) labourRatePerProductInput.value = labourRate;
+    syncProductionLabourAmount();
+    calculateCost();
     if (productDetailsDiv) productDetailsDiv.textContent = details ? `Master: ${name} | ${details}` : `Master: ${name}`;
+}
+
+function buildProductionLineOptions(selectedId = '') {
+    const base = '<option value="">Select Product...</option>';
+    const options = (productMasterItems || []).map((p) => {
+        const name = p.name || p.productName || 'Product';
+        const category = p.category || p.productCategory || '';
+        const selected = String(selectedId) === String(p.id) ? 'selected' : '';
+        return `<option value="${p.id}" ${selected}>${category ? `${name} (${category})` : name}</option>`;
+    }).join('');
+    return `${base}${options}`;
+}
+
+function getProductDefaultLabourRate(productMasterId = '') {
+    const pm = (productMasterItems || []).find(p => String(p.id) === String(productMasterId));
+    return parseFloat(pm?.labourCostPerProduct ?? pm?.labourRatePerProduct ?? 0) || 0;
+}
+
+function addProductionLineRow(preSelectedId = '', preQty = '', preLabourRate = '') {
+    if (!productionMultiLines) return;
+    const rowId = `prod-line-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const defaultRate = preLabourRate !== '' ? preLabourRate : (preSelectedId ? getProductDefaultLabourRate(preSelectedId) : '');
+    const html = `
+        <div class="row g-2 mb-2 align-items-end production-line-row" id="${rowId}">
+            <div class="col-md-5">
+                <label class="form-label small">Product Master</label>
+                <select class="form-select form-select-sm production-line-product">
+                    ${buildProductionLineOptions(preSelectedId)}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Quantity</label>
+                <input type="number" class="form-control form-control-sm production-line-qty" min="1" step="1" value="${preQty || ''}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Labour Rate / Product</label>
+                <input type="number" class="form-control form-control-sm production-line-labour-rate" min="0" step="0.01" value="${defaultRate}">
+            </div>
+            <div class="col-md-1 d-grid">
+                <button type="button" class="btn btn-outline-danger btn-sm production-line-remove-btn">x</button>
+            </div>
+        </div>
+    `;
+    productionMultiLines.insertAdjacentHTML('beforeend', html);
+}
+
+function refreshProductionLineOptions() {
+    if (!productionMultiLines) return;
+    productionMultiLines.querySelectorAll('.production-line-product').forEach((select) => {
+        const selected = select.value || '';
+        select.innerHTML = buildProductionLineOptions(selected);
+    });
+
+    updateProductionSelectionButtons();
+}
+
+function getProductionLineItems() {
+    if (!productionMultiLines) return [];
+    const rows = [];
+    productionMultiLines.querySelectorAll('.production-line-row').forEach((row) => {
+        const productMasterId = row.querySelector('.production-line-product')?.value || '';
+        const quantity = parseFloat(row.querySelector('.production-line-qty')?.value || '0') || 0;
+        const labourRatePerProduct = parseFloat(row.querySelector('.production-line-labour-rate')?.value || '0') || 0;
+        if (!productMasterId || quantity <= 0) return;
+        rows.push({ productMasterId, quantity, labourRatePerProduct });
+    });
+    return rows;
 }
 
 function isRawMaterialInventoryItem(item = {}) {
@@ -1191,6 +1389,74 @@ function addIngredientRow(preSelectedId = null, preQty = null) {
     ingredientsContainer.insertAdjacentHTML('beforeend', html);
 }
 
+function resolveRecipeMaterialId(row = {}) {
+    const directId = String(
+        row.id ?? row.materialId ?? row.itemId ?? row.inventoryId ?? row.rawMaterialId ?? ''
+    ).trim();
+    if (directId) return directId;
+
+    const nameRaw = String(
+        row.name ?? row.materialName ?? row.itemName ?? row.rawMaterialName ?? ''
+    ).trim().toLowerCase();
+    if (!nameRaw) return '';
+
+    const match = (inventoryItems || []).find((item) => String(item?.name || '').trim().toLowerCase() === nameRaw);
+    return match?.id || '';
+}
+
+function resolveRecipeBaseQty(row = {}) {
+    const candidates = [
+        row.quantity,
+        row.qty,
+        row.quantityPerUnit,
+        row.perUnitQty,
+        row.baseQty,
+        row.requiredQty
+    ];
+    for (const value of candidates) {
+        const n = parseFloat(value);
+        if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 0;
+}
+
+function applyProductRawMaterialsToRun(productMaster = null) {
+    if (!ingredientsContainer) return;
+    ingredientsContainer.innerHTML = '';
+    const rawMaterials = Array.isArray(productMaster?.rawMaterials)
+        ? productMaster.rawMaterials
+        : (Array.isArray(productMaster?.ingredients) ? productMaster.ingredients : []);
+    const produceQty = Math.max(1, parseFloat(document.getElementById('produceQuantity')?.value || '1') || 1);
+    const validRows = rawMaterials.filter((row) => {
+        const id = resolveRecipeMaterialId(row);
+        const qty = resolveRecipeBaseQty(row);
+        return id && qty > 0;
+    });
+    if (!validRows.length) {
+        addIngredientRow();
+        return;
+    }
+    validRows.forEach((row) => {
+        const id = resolveRecipeMaterialId(row);
+        const baseQty = resolveRecipeBaseQty(row);
+        const scaledQty = roundMoney(baseQty * produceQty);
+        addIngredientRow(id, scaledQty);
+        const latestRow = ingredientsContainer.querySelector('.ingredient-row:last-child');
+        const qtyInput = latestRow?.querySelector('.ingredient-qty');
+        if (qtyInput) qtyInput.dataset.baseQty = String(baseQty);
+    });
+}
+
+function rescaleRecipeRowsForSingleRun() {
+    if (!ingredientsContainer) return;
+    const produceQty = Math.max(1, parseFloat(document.getElementById('produceQuantity')?.value || '1') || 1);
+    ingredientsContainer.querySelectorAll('.ingredient-row .ingredient-qty').forEach((input) => {
+        const baseQty = parseFloat(input.dataset.baseQty || '');
+        if (!Number.isFinite(baseQty)) return;
+        input.value = String(roundMoney(baseQty * produceQty));
+    });
+}
+
 function calculateCost() {
     if (!estimatedCostElement) return;
     let total = 0;
@@ -1215,8 +1481,9 @@ async function openProductionModal() {
         inventoryItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const form = document.getElementById('productionForm');
         if (form) form.reset();
-        if (ingredientsContainer) ingredientsContainer.innerHTML = '';
-        addIngredientRow();
+        if (productionMultiLines) productionMultiLines.innerHTML = '';
+        if (addProductionLineBtn) addProductionLineBtn.disabled = false;
+        applyProductRawMaterialsToRun(null);
         if (labourQtyInput) labourQtyInput.value = '0';
         if (labourRatePerProductInput) labourRatePerProductInput.value = '0';
         if (labourCostInput) labourCostInput.value = '0';
@@ -1238,67 +1505,48 @@ async function saveProductionRun() {
     const businessId = user.businessId || user.uid;
     if (!businessId) return;
 
-    const produceQty = parseFloat(document.getElementById('produceQuantity')?.value || '0') || 0;
     const productionDateVal = document.getElementById('productionDate')?.value || '';
-    const productMasterId = prodProductMasterSelect?.value || '';
-    const selectedProductMaster = productMasterItems.find(p => p.id === productMasterId);
-    const labourQty = parseFloat(labourQtyInput?.value || produceQty || '0') || 0;
-    const labourRatePerProduct = parseFloat(labourRatePerProductInput?.value || '0') || 0;
-    const labourCost = roundMoney(labourQty * labourRatePerProduct);
     const brokenQty = parseFloat(document.getElementById('brokenQuantity')?.value || '0') || 0;
     const wastageQty = parseFloat(document.getElementById('wastageQuantity')?.value || '0') || 0;
-
-    if (!selectedProductMaster) return showAlert('danger', 'Please select Product Master.');
-    if (!produceQty || produceQty <= 0) return showAlert('danger', 'Please enter a valid quantity.');
     if (!prodCastingLocationSelect?.value) return showAlert('danger', 'Please select production location.');
 
-    const ingredientsUsed = [];
-    document.querySelectorAll('.ingredient-row').forEach(row => {
-        const select = row.querySelector('.ingredient-select');
-        const qtyInput = row.querySelector('.ingredient-qty');
-        const id = select?.value || '';
-        const qty = parseFloat(qtyInput?.value || '0') || 0;
-        if (!id || qty <= 0) return;
-        const item = inventoryItems.find(i => i.id === id);
-        ingredientsUsed.push({ id, name: item?.name || 'Material', quantity: qty, unit: item?.unit || '' });
-    });
+    // For edit, keep legacy single-run behavior.
+    if (currentEditId) {
+        const produceQty = parseFloat(document.getElementById('produceQuantity')?.value || '0') || 0;
+        const productMasterId = prodProductMasterSelect?.value || '';
+        const selectedProductMaster = productMasterItems.find(p => p.id === productMasterId);
+        const labourQty = parseFloat(labourQtyInput?.value || produceQty || '0') || 0;
+        const labourRatePerProduct = parseFloat(labourRatePerProductInput?.value || '0') || 0;
+        const labourCost = roundMoney(labourQty * labourRatePerProduct);
+        if (!selectedProductMaster) return showAlert('danger', 'Please select Product Master.');
+        if (!produceQty || produceQty <= 0) return showAlert('danger', 'Please enter a valid quantity.');
 
-    const saveBtn = saveProductionBtn;
-    const originalText = saveBtn?.innerHTML || '';
-    if (saveBtn) {
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
-    }
+        const ingredientsUsedSingle = [];
+        document.querySelectorAll('.ingredient-row').forEach(row => {
+            const select = row.querySelector('.ingredient-select');
+            const qtyInput = row.querySelector('.ingredient-qty');
+            const id = select?.value || '';
+            const qty = parseFloat(qtyInput?.value || '0') || 0;
+            if (!id || qty <= 0) return;
+            const item = inventoryItems.find(i => i.id === id);
+            ingredientsUsedSingle.push({ id, name: item?.name || 'Material', quantity: qty, unit: item?.unit || '' });
+        });
 
-    try {
-        const userRef = db.collection('users').doc(businessId);
-        const fgName = selectedProductMaster.name || selectedProductMaster.productName || 'Product';
-        const fgSnap = await userRef.collection('inventory').where('name', '==', fgName).limit(1).get();
-        let fgId = '';
-        if (fgSnap.empty) {
-            const fgRef = await userRef.collection('inventory').add({
-                name: fgName,
-                category: 'Finished Goods',
-                unit: selectedProductMaster.unit || 'Nos',
-                quantity: 0,
-                costPrice: Number(selectedProductMaster.costPrice || 0),
-                createdAt: new Date(),
-                updatedAt: new Date()
-            });
-            fgId = fgRef.id;
-        } else {
-            fgId = fgSnap.docs[0].id;
+        const saveBtn = saveProductionBtn;
+        const originalText = saveBtn?.innerHTML || '';
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
         }
-
-        const productionDate = productionDateVal ? new Date(productionDateVal) : new Date();
-        const batchId = productionDate.toLocaleDateString(undefined, { weekday: 'long' });
-
-        if (currentEditId) {
+        try {
+            const userRef = db.collection('users').doc(businessId);
+            const productionDate = productionDateVal ? new Date(productionDateVal) : new Date();
+            const fgName = selectedProductMaster.name || selectedProductMaster.productName || 'Product';
             await userRef.collection('production_runs').doc(currentEditId).update({
                 date: productionDate,
                 quantityProduced: produceQty,
-                ingredients: ingredientsUsed,
-                productMasterId,
+                ingredients: ingredientsUsedSingle,
+                productMasterId: selectedProductMaster.id,
                 productMasterName: fgName,
                 productType: selectedProductMaster.category || '',
                 pipeType: selectedProductMaster.pipeType || '',
@@ -1312,44 +1560,209 @@ async function saveProductionRun() {
                 wastageQuantity: wastageQty,
                 updatedAt: new Date()
             });
-        } else {
-            await db.runTransaction(async (tx) => {
-                const ingredientReadResults = [];
-                for (const ing of ingredientsUsed) {
-                    const ingRef = userRef.collection('inventory').doc(ing.id);
-                    const ingDoc = await tx.get(ingRef);
-                    if (!ingDoc.exists) throw new Error(`Material not found: ${ing.name}`);
-                    const currentQty = Number(ingDoc.data().quantity || 0);
-                    if (currentQty < ing.quantity) throw new Error(`Insufficient stock for ${ing.name}. Available: ${currentQty}`);
-                    ingredientReadResults.push({ ingRef, nextQty: roundMoney(currentQty - ing.quantity) });
+            bootstrap.Modal.getInstance(productionModal)?.hide();
+            showAlert('success', 'Production updated.');
+            currentEditId = null;
+            await loadProductionHistory();
+        } catch (error) {
+            console.error('saveProductionRun failed', error);
+            showAlert('danger', error.message || 'Failed to save production.');
+        } finally {
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalText || 'Start Production';
+            }
+        }
+        return;
+    }
+
+    // New-run flow: treat main run + multiple lines as a single list of runs.
+    const runInputs = [];
+    const mainProductMasterId = prodProductMasterSelect?.value || '';
+    const mainQty = parseFloat(document.getElementById('produceQuantity')?.value || '0') || 0;
+    if (mainProductMasterId || mainQty > 0) {
+        if (!mainProductMasterId || mainQty <= 0) {
+            return showAlert('danger', 'For main run, select product and enter valid quantity.');
+        }
+        runInputs.push({
+            productMasterId: mainProductMasterId,
+            quantity: mainQty,
+            labourRatePerProduct: parseFloat(labourRatePerProductInput?.value || '0') || 0,
+            source: 'main'
+        });
+    }
+    const multiLineItems = getProductionLineItems();
+    multiLineItems.forEach((line) => {
+        runInputs.push({
+            productMasterId: line.productMasterId,
+            quantity: parseFloat(line.quantity || '0') || 0,
+            labourRatePerProduct: parseFloat(line.labourRatePerProduct || '0') || 0,
+            source: 'line'
+        });
+    });
+    if (!runInputs.length) return showAlert('danger', 'Add at least one run (main or product lines).');
+
+    const runsToCreate = runInputs.map((line) => {
+        const pm = productMasterItems.find(p => p.id === line.productMasterId);
+        return { line, pm };
+    });
+    const missing = runsToCreate.find(item => !item.pm);
+    if (missing) return showAlert('danger', 'One or more selected product masters are invalid.');
+
+    const saveBtn = saveProductionBtn;
+    const originalText = saveBtn?.innerHTML || '';
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+    }
+
+    try {
+        const userRef = db.collection('users').doc(businessId);
+        const productionDate = productionDateVal ? new Date(productionDateVal) : new Date();
+        const batchId = getRunBatchLabel(productionDate);
+        const productToFgId = {};
+        const productToHsn = {};
+
+        for (const item of runsToCreate) {
+            const pm = item.pm;
+            const fgName = pm.name || pm.productName || 'Product';
+            if (productToFgId[pm.id]) continue;
+            const fgSnap = await userRef.collection('inventory').where('name', '==', fgName).limit(1).get();
+            const existingFg = fgSnap.empty ? null : (fgSnap.docs[0].data() || {});
+            const resolvedHsn = resolveHsn(
+                pm.hsn,
+                existingFg?.hsn,
+                inferHsnForFinishedGood(fgName, pm.category || pm.productCategory || '')
+            );
+            if (fgSnap.empty) {
+                const fgRef = await userRef.collection('inventory').add({
+                    name: fgName,
+                    category: 'Finished Goods',
+                    unit: pm.unit || 'Nos',
+                    quantity: 0,
+                    costPrice: Number(pm.costPrice || 0),
+                    sellingPrice: Number(pm.sellingPrice || 0),
+                    hsn: resolvedHsn,
+                    gstRate: resolveGstRate(pm.gstRate),
+                    createdAt: new Date(),
+                    updatedAt: new Date()
+                });
+                productToFgId[pm.id] = fgRef.id;
+                productToHsn[pm.id] = resolvedHsn;
+            } else {
+                productToFgId[pm.id] = fgSnap.docs[0].id;
+                productToHsn[pm.id] = resolvedHsn;
+                await userRef.collection('inventory').doc(productToFgId[pm.id]).set({
+                    category: 'Finished Goods',
+                    unit: pm.unit || 'Nos',
+                    costPrice: Number(pm.costPrice || 0),
+                    sellingPrice: Number(pm.sellingPrice || 0),
+                    hsn: resolvedHsn,
+                    gstRate: resolveGstRate(pm.gstRate),
+                    updatedAt: new Date()
+                }, { merge: true });
+            }
+        }
+
+        await db.runTransaction(async (tx) => {
+            const requiredByIngredient = new Map();
+            const preparedRuns = runsToCreate.map(({ line, pm }) => {
+                const produceQty = parseFloat(line.quantity || '0') || 0;
+                const defaultRate = parseFloat(pm.labourCostPerProduct ?? pm.labourRatePerProduct ?? 0) || 0;
+                const labourRatePerProduct = Number.isFinite(Number(line.labourRatePerProduct)) ? Number(line.labourRatePerProduct) : defaultRate;
+                const labourQty = produceQty;
+                const labourCost = roundMoney(labourQty * labourRatePerProduct);
+                const masterIngredients = Array.isArray(pm.rawMaterials) ? pm.rawMaterials : (Array.isArray(pm.ingredients) ? pm.ingredients : []);
+
+                // If main run has no recipe in Product Master, allow manual ingredient rows as fallback.
+                let ingredients = [];
+                if (masterIngredients.length > 0) {
+                    ingredients = masterIngredients.map((row) => {
+                        const id = resolveRecipeMaterialId(row);
+                        const baseQty = resolveRecipeBaseQty(row);
+                        const qty = roundMoney(baseQty * produceQty);
+                        if (!id || qty <= 0) return null;
+                        const inv = inventoryItems.find(i => i.id === id);
+                        return {
+                            id,
+                            name: inv?.name || row?.name || row?.materialName || 'Material',
+                            quantity: qty,
+                            unit: inv?.unit || row?.unit || ''
+                        };
+                    }).filter(Boolean);
+                } else if (line.source === 'main') {
+                    document.querySelectorAll('.ingredient-row').forEach((row) => {
+                        const id = row.querySelector('.ingredient-select')?.value || '';
+                        const qty = parseFloat(row.querySelector('.ingredient-qty')?.value || '0') || 0;
+                        if (!id || qty <= 0) return;
+                        const inv = inventoryItems.find(i => i.id === id);
+                        ingredients.push({ id, name: inv?.name || 'Material', quantity: qty, unit: inv?.unit || '' });
+                    });
                 }
 
-                ingredientReadResults.forEach(({ ingRef, nextQty }) => {
-                    tx.update(ingRef, { quantity: nextQty, updatedAt: new Date() });
+                ingredients.forEach((ing) => {
+                    const prev = requiredByIngredient.get(ing.id) || { qty: 0, name: ing.name };
+                    requiredByIngredient.set(ing.id, { qty: roundMoney(prev.qty + ing.quantity), name: ing.name || prev.name });
                 });
 
+                return {
+                    pm,
+                    produceQty,
+                    labourQty,
+                    labourRatePerProduct,
+                    labourCost,
+                    ingredients,
+                    fgId: productToFgId[pm.id],
+                    fgName: pm.name || pm.productName || 'Product'
+                };
+            });
+
+            const ingredientReadResults = [];
+            for (const [ingId, req] of requiredByIngredient.entries()) {
+                const ingRef = userRef.collection('inventory').doc(ingId);
+                const ingDoc = await tx.get(ingRef);
+                if (!ingDoc.exists) throw new Error(`Material not found: ${req.name}`);
+                const currentQty = Number(ingDoc.data().quantity || 0);
+                if (currentQty < req.qty) throw new Error(`Insufficient stock for ${req.name}. Available: ${currentQty}`);
+                ingredientReadResults.push({ ingRef, nextQty: roundMoney(currentQty - req.qty) });
+            }
+
+            ingredientReadResults.forEach(({ ingRef, nextQty }) => {
+                tx.update(ingRef, { quantity: nextQty, updatedAt: new Date() });
+            });
+
+            preparedRuns.forEach((run) => {
                 const runRef = userRef.collection('production_runs').doc();
                 tx.set(runRef, {
                     batchId,
                     date: productionDate,
-                    finishedGoodId: fgId,
-                    finishedGoodName: fgName,
-                    productMasterId,
-                    productMasterName: fgName,
-                    productType: selectedProductMaster.category || '',
-                    pipeType: selectedProductMaster.pipeType || '',
-                    loadClass: selectedProductMaster.loadClass || '',
+                    finishedGoodId: run.fgId,
+                    finishedGoodName: run.fgName,
+                    productMasterId: run.pm.id,
+                    productMasterName: run.fgName,
+                    productType: run.pm.category || '',
+                    pipeType: run.pm.pipeType || '',
+                    loadClass: run.pm.loadClass || '',
+                    hsn: resolveHsn(
+                        productToHsn[run.pm.id],
+                        run.pm.hsn,
+                        inferHsnForFinishedGood(run.fgName, run.pm.category || run.pm.productCategory || '')
+                    ),
+                    gstRate: resolveGstRate(run.pm.gstRate),
+                    costPrice: Number(run.pm.costPrice || 0),
+                    sellingPrice: Number(run.pm.sellingPrice || 0),
+                    unit: run.pm.unit || 'Nos',
                     productionLocationId: prodCastingLocationSelect?.value || null,
                     productionLocation: prodCastingLocationSelect?.selectedOptions?.[0]?.dataset.locationName || null,
                     septicLocationId: null,
                     septicLocation: null,
-                    quantityProduced: produceQty,
+                    quantityProduced: run.produceQty,
                     brokenQuantity: brokenQty,
                     wastageQuantity: wastageQty,
-                    ingredients: ingredientsUsed,
-                    labourCost,
-                    labourQty,
-                    labourRatePerProduct,
+                    ingredients: run.ingredients,
+                    labourCost: run.labourCost,
+                    labourQty: run.labourQty,
+                    labourRatePerProduct: run.labourRatePerProduct,
                     powerCost: 0,
                     labourCostMode: 'per_product',
                     status: 'Started',
@@ -1361,11 +1774,10 @@ async function saveProductionRun() {
                     updatedAt: new Date()
                 });
             });
-        }
+        });
 
         bootstrap.Modal.getInstance(productionModal)?.hide();
-        showAlert('success', currentEditId ? 'Production updated.' : 'Production run saved.');
-        currentEditId = null;
+        showAlert('success', `${runsToCreate.length} production run(s) saved.`);
         await loadProductionHistory();
     } catch (error) {
         console.error('saveProductionRun failed', error);
@@ -1439,13 +1851,21 @@ async function saveCuringComplete() {
         await db.runTransaction(async (tx) => {
             const userRef = db.collection('users').doc(businessId);
             const runRef = userRef.collection('production_runs').doc(currentCompleteRunId);
+            const runDoc = await tx.get(runRef);
+            if (!runDoc.exists) {
+                throw new Error('Production run not found. It may have been deleted.');
+            }
             let fgRef = null;
+            let fgExists = false;
             let fgCurrentQty = 0;
+            let fgExistingHsn = '';
             if (goodIncrement > 0 && run.finishedGoodId) {
                 fgRef = userRef.collection('inventory').doc(run.finishedGoodId);
                 const fgDoc = await tx.get(fgRef);
                 if (fgDoc.exists) {
+                    fgExists = true;
                     fgCurrentQty = Number(fgDoc.data().quantity || 0);
+                    fgExistingHsn = String(fgDoc.data().hsn || '').trim();
                 }
             }
 
@@ -1460,7 +1880,36 @@ async function saveCuringComplete() {
             });
 
             if (fgRef) {
-                tx.update(fgRef, { quantity: roundMoney(fgCurrentQty + goodIncrement), updatedAt: new Date() });
+                const fallbackHsn = resolveHsn(
+                    run.hsn,
+                    fgExistingHsn,
+                    inferHsnForFinishedGood(run.finishedGoodName, run.productType || '')
+                );
+                if (fgExists) {
+                    tx.update(fgRef, {
+                        quantity: roundMoney(fgCurrentQty + goodIncrement),
+                        category: 'Finished Goods',
+                        unit: run.unit || 'Nos',
+                        costPrice: Number(run.costPrice || 0),
+                        sellingPrice: Number(run.sellingPrice || 0),
+                        hsn: fallbackHsn,
+                        gstRate: resolveGstRate(run.gstRate),
+                        updatedAt: new Date()
+                    });
+                } else {
+                    tx.set(fgRef, {
+                        name: run.finishedGoodName || 'Finished Good',
+                        category: 'Finished Goods',
+                        unit: run.unit || 'Nos',
+                        quantity: roundMoney(goodIncrement),
+                        costPrice: Number(run.costPrice || 0),
+                        sellingPrice: Number(run.sellingPrice || 0),
+                        hsn: fallbackHsn,
+                        gstRate: resolveGstRate(run.gstRate),
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    }, { merge: true });
+                }
             }
         });
         bootstrap.Modal.getInstance(curingCompleteModal)?.hide();
@@ -1497,6 +1946,12 @@ async function saveSepticAllocation() {
         // Find or create Finished Good
         const fgSnap = await userRef.collection('inventory').where('name', '==', fgName).limit(1).get();
         let fgId = '';
+        const existingFg = fgSnap.empty ? null : (fgSnap.docs[0].data() || {});
+        const resolvedHsn = resolveHsn(
+            septicProduct.hsn,
+            existingFg?.hsn,
+            inferHsnForFinishedGood(fgName, septicProduct.category || septicProduct.productCategory || '')
+        );
         if (fgSnap.empty) {
             const fgRef = await userRef.collection('inventory').add({
                 name: fgName,
@@ -1504,12 +1959,24 @@ async function saveSepticAllocation() {
                 unit: septicProduct.unit || 'Nos',
                 quantity: 0,
                 costPrice: Number(septicProduct.costPrice || 0),
+                sellingPrice: Number(septicProduct.sellingPrice || 0),
+                hsn: resolvedHsn,
+                gstRate: resolveGstRate(septicProduct.gstRate),
                 createdAt: new Date(),
                 updatedAt: new Date()
             });
             fgId = fgRef.id;
         } else {
             fgId = fgSnap.docs[0].id;
+            await userRef.collection('inventory').doc(fgId).set({
+                category: 'Finished Goods',
+                unit: septicProduct.unit || 'Nos',
+                costPrice: Number(septicProduct.costPrice || 0),
+                sellingPrice: Number(septicProduct.sellingPrice || 0),
+                hsn: resolvedHsn,
+                gstRate: resolveGstRate(septicProduct.gstRate),
+                updatedAt: new Date()
+            }, { merge: true });
         }
 
         await db.runTransaction(async (tx) => {
@@ -1574,24 +2041,71 @@ async function saveSepticAllocation() {
     }
 }
 
-async function deleteProductionRun(id) {
+function getSelectedProductionRunIds(scope = 'all') {
+    const selected = new Set();
+    let selector = '.prod-run-cb:checked';
+    if (scope === 'pipes') selector = '#productionTablePipes .prod-run-cb:checked';
+    if (scope === 'septic') selector = '#productionTableSeptic .prod-run-cb:checked';
+    document.querySelectorAll(selector).forEach((cb) => {
+        const id = cb.dataset.id || '';
+        if (id) selected.add(id);
+    });
+    return Array.from(selected);
+}
+
+function updateProductionSelectionButtons() {
+    const pipesCount = getSelectedProductionRunIds('pipes').length;
+    const septicCount = getSelectedProductionRunIds('septic').length;
+    if (deleteSelectedPipesBtn) {
+        deleteSelectedPipesBtn.disabled = pipesCount === 0;
+    }
+    if (deleteSelectedSepticBtn) {
+        deleteSelectedSepticBtn.disabled = septicCount === 0;
+    }
+    if (productionPipesSelectAll) {
+        const cbs = productionTablePipes?.querySelectorAll('.prod-run-cb') || [];
+        productionPipesSelectAll.checked = !!cbs.length && Array.from(cbs).every(cb => cb.checked);
+    }
+    if (productionSepticSelectAll) {
+        const cbs = productionTableSeptic?.querySelectorAll('.prod-run-cb') || [];
+        productionSepticSelectAll.checked = !!cbs.length && Array.from(cbs).every(cb => cb.checked);
+    }
+}
+
+async function deleteProductionRuns(ids = [], options = {}) {
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     const businessId = user.businessId || user.uid;
-    if (!businessId || !id) return;
-    if (!window.confirm('Delete this production run?')) return;
+    const runIds = Array.from(new Set((ids || []).filter(Boolean)));
+    if (!businessId || !runIds.length) return false;
+    if (options.confirm !== false) {
+        const label = runIds.length > 1 ? `${runIds.length} production runs` : 'this production run';
+        if (!window.confirm(`Delete ${label}?`)) return false;
+    }
     try {
         const userRef = db.collection('users').doc(businessId);
-        const payablesSnap = await userRef.collection('labour_payables').where('runId', '==', id).get();
-        const batch = db.batch();
-        payablesSnap.forEach(doc => batch.delete(doc.ref));
-        batch.delete(userRef.collection('production_runs').doc(id));
-        await batch.commit();
-        showAlert('success', 'Production run deleted.');
+        for (const id of runIds) {
+            const payablesSnap = await userRef.collection('labour_payables').where('runId', '==', id).get();
+            const batch = db.batch();
+            payablesSnap.forEach(doc => batch.delete(doc.ref));
+            batch.delete(userRef.collection('production_runs').doc(id));
+            await batch.commit();
+        }
+        showAlert('success', runIds.length > 1 ? `${runIds.length} production runs deleted.` : 'Production run deleted.');
         await loadProductionHistory();
+        return true;
     } catch (error) {
-        console.error('deleteProductionRun failed', error);
-        showAlert('danger', 'Failed to delete production run.');
+        console.error('deleteProductionRuns failed', error);
+        showAlert('danger', 'Failed to delete production run(s).');
+        return false;
     }
+}
+async function deleteProductionRun(id) {
+    return deleteProductionRuns([id], { confirm: true });
+}
+async function deleteSelectedProductionRuns(scope = 'all') {
+    const ids = getSelectedProductionRunIds(scope);
+    if (!ids.length) return;
+    await deleteProductionRuns(ids, { confirm: true });
 }
 window.deleteProductionRun = deleteProductionRun;
 
@@ -1615,7 +2129,7 @@ async function syncLabourPayablesForRuns(businessId, runs = []) {
         const status = amountPaid <= 0 ? (old?.status === 'approved' ? 'approved' : 'pending') : (amountPending <= 0 ? 'paid' : 'partial');
         batch.set(colRef.doc(id), {
             runId: run.id,
-            batchId: getRunDayLabel(run),
+            batchId: run.batchId || getRunBatchLabel(run),
             productName: run.finishedGoodName || 'Production Labour',
             producedDate: workDate,
             workDate,
@@ -1680,7 +2194,7 @@ function renderLabourPaymentTracker(payables = [], scopedRuns = []) {
         })
         .sort((a, b) => `${b.producedDate}`.localeCompare(`${a.producedDate}`));
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="11" class="text-center text-muted">No labour payables found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No labour payables found</td></tr>';
     } else {
         tbody.innerHTML = rows.slice(0, 200).map(p => {
             const run = runById.get(p.runId) || {};
@@ -1712,7 +2226,6 @@ function renderLabourPaymentTracker(payables = [], scopedRuns = []) {
                     </td>
                     <td class="text-end">${qtyProduced.toLocaleString()}</td>
                     <td class="text-end">${formatMoney(ratePerProduct)}</td>
-                    <td>${p.workerName || 'Labour Team'}</td>
                     <td class="text-end">${formatMoney(p.due)}</td>
                     <td class="text-end text-success">${formatMoney(p.paid)}</td>
                     <td class="text-end text-danger">${formatMoney(p.pending)}</td>
@@ -1724,6 +2237,9 @@ function renderLabourPaymentTracker(payables = [], scopedRuns = []) {
                             </button>
                             <button type="button" class="btn btn-sm btn-outline-danger" title="Download PDF" ${(p.paid > 0) ? `onclick="window.downloadPaidLabourPdf('${p.id}')"` : 'disabled'}>
                                 <i class="fas fa-file-pdf"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-danger delete-labour-payable-btn" title="Delete" data-payable-id="${p.id}">
+                                <i class="fas fa-trash"></i>
                             </button>
                         </div>
                     </td>
@@ -2143,8 +2659,29 @@ function labourAmountToWords(num) {
     return parts.length ? parts.join(' ').trim() : 'Zero';
 }
 
+function sortLabourInvoiceRows(rows = []) {
+    return [...rows].sort((a, b) => {
+        const dateA = String(a.workDate || '');
+        const dateB = String(b.workDate || '');
+        if (dateA !== dateB) return dateA.localeCompare(dateB);
+
+        const productA = String(a.product || '').toLowerCase();
+        const productB = String(b.product || '').toLowerCase();
+        if (productA !== productB) return productA.localeCompare(productB);
+
+        const typeA = String(a.pipeType || '').toLowerCase();
+        const typeB = String(b.pipeType || '').toLowerCase();
+        if (typeA !== typeB) return typeA.localeCompare(typeB);
+
+        const classA = String(a.loadClass || '').toLowerCase();
+        const classB = String(b.loadClass || '').toLowerCase();
+        return classA.localeCompare(classB);
+    });
+}
+
 async function generateLabourInvoicePdf(rows, fromDate, toDate, company = {}) {
     if (!Array.isArray(rows) || !rows.length) return;
+    const sortedRows = sortLabourInvoiceRows(rows);
 
     const safe = (val) => (val === null || val === undefined || val === '') ? '-' : val;
     const companyName = company.companyName || 'PipePro';
@@ -2158,14 +2695,17 @@ async function generateLabourInvoicePdf(rows, fromDate, toDate, company = {}) {
 
     const invoiceNo = `LAB-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
     const invoiceDate = formatDate(new Date());
-    const total = rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
-    const rangeLabel = `${formatYmdLabel(fromDate)} to ${formatYmdLabel(toDate)}`;
+    const total = sortedRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+    const dateRange = sortedRows.map(r => String(r.workDate || '')).filter(Boolean).sort();
+    const resolvedFromDate = fromDate || dateRange[0] || '';
+    const resolvedToDate = toDate || dateRange[dateRange.length - 1] || '';
+    const rangeLabel = `${formatYmdLabel(resolvedFromDate)} to ${formatYmdLabel(resolvedToDate)}`;
     const amountWords = `${labourAmountToWords(Math.round(total))} Rupees Only`;
 
-    const workers = [...new Set(rows.map(r => r.worker || 'Labour Team'))];
+    const workers = [...new Set(sortedRows.map(r => r.worker || 'Labour Team'))];
     const workerLabel = workers.length <= 3 ? workers.join(', ') : `${workers.slice(0, 3).join(', ')} (+${workers.length - 3} more)`;
 
-    const itemsRows = rows.map((r, idx) => {
+    const itemsRows = sortedRows.map((r, idx) => {
         const productLines = [];
         productLines.push(`<div class="item-name">${r.product || 'Production Labour'}</div>`);
         const meta = [r.category, r.pipeType, r.loadClass].filter(Boolean).join(' | ');
@@ -2177,7 +2717,6 @@ async function generateLabourInvoicePdf(rows, fromDate, toDate, company = {}) {
             <td>${productLines.join('')}</td>
             <td class="text-end">${Number(r.qtyProduced || 0).toLocaleString()}</td>
             <td class="text-end">&#8377;${roundMoney(r.ratePerProduct || 0).toFixed(2)}</td>
-            <td>${r.worker || 'Labour Team'}</td>
             <td class="text-end">&#8377;${roundMoney(r.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>`;
     }).join('');
@@ -2256,7 +2795,7 @@ async function generateLabourInvoicePdf(rows, fromDate, toDate, company = {}) {
             <div class="info-box">
                 <div class="info-title">Worker Details</div>
                 <div>${workerLabel}</div>
-                <div class="muted">Total Entries: ${rows.length}</div>
+                <div class="muted">Total Entries: ${sortedRows.length}</div>
                 <div class="muted">Work Period: ${rangeLabel}</div>
             </div>
             <div class="info-box">
@@ -2268,7 +2807,7 @@ async function generateLabourInvoicePdf(rows, fromDate, toDate, company = {}) {
             <div class="info-box">
                 <div class="info-title">Payment Summary</div>
                 <div><strong>Total Amount:</strong> &#8377;${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                <div class="muted">Entries: ${rows.length}</div>
+                <div class="muted">Entries: ${sortedRows.length}</div>
                 <div class="muted">Workers: ${workers.length}</div>
             </div>
         </div>
@@ -2281,7 +2820,6 @@ async function generateLabourInvoicePdf(rows, fromDate, toDate, company = {}) {
                     <th>Product Details</th>
                     <th class="text-end">Qty Produced</th>
                     <th class="text-end">Rate/Product</th>
-                    <th>Worker</th>
                     <th class="text-end">Amount</th>
                 </tr>
             </thead>
@@ -2418,7 +2956,7 @@ window.viewLabourLedger = (id, options = {}) => {
     const tbody = labourLedgerTable.querySelector('tbody');
     if (tbody) {
         if (!entries.length) {
-            tbody.innerHTML = '<tr><td colspan="11" class="text-center text-muted">No labour entries found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No labour entries found</td></tr>';
         } else {
             tbody.innerHTML = entries.map(entry => {
                 const refs = (entry.txIds || []).length ? (entry.txIds || []).slice(-2).join(', ') : '-';
@@ -2441,7 +2979,6 @@ window.viewLabourLedger = (id, options = {}) => {
                         <td>${productLabel}</td>
                         <td class="text-end">${qtyProduced.toLocaleString()}</td>
                         <td class="text-end">${formatMoney(ratePerProduct)}</td>
-                        <td>${entry.workerName || 'Labour Team'}</td>
                         <td class="text-end">${formatMoney(entry.due)}</td>
                         <td class="text-end text-success">${formatMoney(entry.paid)}</td>
                         <td class="text-end text-danger">${formatMoney(entry.pending)}</td>
@@ -2463,7 +3000,7 @@ window.viewLabourLedger = (id, options = {}) => {
             }).join('');
         }
     }
-    if (labourLedgerBatch) labourLedgerBatch.textContent = getRunDayLabel(run);
+    if (labourLedgerBatch) labourLedgerBatch.textContent = run.batchId || getRunBatchLabel(run);
     if (labourLedgerProduct) labourLedgerProduct.textContent = run.finishedGoodName || '-';
     if (labourLedgerTotal) labourLedgerTotal.textContent = formatMoney(entries.reduce((sum, e) => sum + e.due, 0));
     if (labourLedgerPaidTotal) labourLedgerPaidTotal.textContent = formatMoney(entries.reduce((sum, e) => sum + e.paid, 0));
