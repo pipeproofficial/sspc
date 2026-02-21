@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -511,10 +510,24 @@
                         <div class="card-header d-flex align-items-center justify-content-between">
                             <div>
                                 <h6 class="m-0 fw-bold text-dark">Revenue Momentum</h6>
-                                <small class="text-muted">Invoices paid over the last 6 months</small>
+                                <small class="text-muted" id="revenueMomentumSubtitle">Paid invoice trend</small>
                             </div>
-                            <div class="header-actions">
-                                <button class="btn btn-sm btn-outline-dark">Export</button>
+                            <div class="header-actions d-flex align-items-center gap-2">
+                                <select class="form-select form-select-sm" id="revenuePeriodFilter" style="width: 130px;">
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="monthly" selected>Monthly</option>
+                                    <option value="yearly">Yearly</option>
+                                </select>
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-outline-dark dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                        Export
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><button class="dropdown-item" id="exportRevenueMomentumCsvBtn"><i class="fas fa-file-csv me-2"></i>CSV</button></li>
+                                        <li><button class="dropdown-item" id="exportRevenueMomentumPdfBtn"><i class="fas fa-file-pdf me-2"></i>PDF</button></li>
+                                    </ul>
+                                </div>
                             </div>
                         </div>
                         <div class="card-body">
@@ -682,13 +695,12 @@
                                 <tr>
                                     <th>Item</th>
                                     <th>Category</th>
-                                    <th>Description</th>
+                                    <th>Pipe Type</th>
+                                    <th>Load Class</th>
                                     <th>HSN/SAC</th>
                                     <th>GST%</th>
                                     <th>Qty</th>
-                                    <th>Reorder</th>
                                     <th>Unit</th>
-                                    <th>Cost</th>
                                     <th>Price</th>
                                     <th>Actions</th>
                                 </tr>
@@ -1302,7 +1314,6 @@
                                             <th>Product</th>
                                             <th class="text-end">Qty</th>
                                             <th class="text-end">Rate</th>
-                                            <th>Worker</th>
                                             <th class="text-end">Due</th>
                                             <th class="text-end">Paid</th>
                                             <th class="text-end">Pending</th>
@@ -1317,14 +1328,20 @@
                     </div>
 
                     <div class="card shadow mb-4">
-                        <div class="card-header py-3">
+                        <div class="card-header py-3 d-flex justify-content-between align-items-center">
                             <h6 class="m-0 fw-bold text-primary">RCC Pipe Production Runs</h6>
+                            <button class="btn btn-sm btn-outline-danger" id="deleteSelectedPipesBtn" disabled
+                                title="Delete Selected RCC Runs">
+                                <i class="fas fa-trash"></i>
+                            </button>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
                                 <table class="table table-hover production-table" id="productionTablePipes">
                                     <thead>
                                         <tr>
+                                            <th style="width:32px"><input type="checkbox" class="form-check-input"
+                                                    id="productionPipesSelectAll" title="Select All"></th>
                                             <th>Date / Day</th>
                                             <th>Product</th>
                                             <th>Quantity Flow</th>
@@ -1339,14 +1356,20 @@
                         </div>
                     </div>
                     <div class="card shadow mb-4">
-                        <div class="card-header py-3">
+                        <div class="card-header py-3 d-flex justify-content-between align-items-center">
                             <h6 class="m-0 fw-bold text-primary">Septic Tank Assembly Runs</h6>
+                            <button class="btn btn-sm btn-outline-danger" id="deleteSelectedSepticBtn" disabled
+                                title="Delete Selected Septic Runs">
+                                <i class="fas fa-trash"></i>
+                            </button>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
                                 <table class="table table-hover production-table" id="productionTableSeptic">
                                     <thead>
                                         <tr>
+                                            <th style="width:32px"><input type="checkbox" class="form-check-input"
+                                                    id="productionSepticSelectAll" title="Select All"></th>
                                             <th>Date / Day</th>
                                             <th>Product</th>
                                             <th>Quantity Flow</th>
@@ -1999,6 +2022,22 @@
                                                 <div class="form-check mb-1">
                                                     <input class="form-check-input" type="checkbox" id="invShowGstin" checked>
                                                     <label class="form-check-label small" for="invShowGstin">Show GSTIN</label>
+                                                </div>
+                                            </div>
+                                            <div class="col-12">
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="invEnableCustomTerms">
+                                                    <label class="form-check-label small" for="invEnableCustomTerms">Enable Custom Terms & Conditions</label>
+                                                </div>
+                                            </div>
+                                            <div class="col-12 d-none" id="invCustomTermsWrap">
+                                                <label class="form-label small mb-1">Custom Terms & Conditions</label>
+                                                <textarea class="form-control form-control-sm" id="invCustomTermsText" rows="3"
+                                                    placeholder="Enter terms and conditions"></textarea>
+                                                <div class="d-flex justify-content-end mt-2">
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="invFillDefaultTermsBtn">
+                                                        Use Standard Terms
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3713,6 +3752,19 @@
                                     <label class="form-label">Production Date</label>
                                     <input type="date" class="form-control" id="productionDate">
                                 </div>
+                                <div class="col-12">
+                                    <div class="border rounded p-2 bg-light">
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <label class="form-label fw-bold mb-0">Multiple Products (Optional)</label>
+                                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                                id="addProductionLineBtn"><i class="fas fa-plus me-1"></i>Add Product
+                                                Line</button>
+                                        </div>
+                                        <div id="productionMultiLines" class="small"></div>
+                                        <div class="form-text">Add multiple products with separate labour rate for each
+                                            line. One click creates all runs.</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -3785,14 +3837,13 @@
                             <thead class="table-light">
                                 <tr>
                                     <th>Date</th>
-                                    <th>Product</th>
-                                    <th class="text-end">Qty</th>
-                                    <th class="text-end">Rate</th>
-                                    <th>Worker</th>
-                                    <th class="text-end">Due</th>
-                                    <th class="text-end">Paid</th>
-                                    <th class="text-end">Pending</th>
-                                    <th>Status</th>
+                                            <th>Product</th>
+                                            <th class="text-end">Qty</th>
+                                            <th class="text-end">Rate</th>
+                                            <th class="text-end">Due</th>
+                                            <th class="text-end">Paid</th>
+                                            <th class="text-end">Pending</th>
+                                            <th>Status</th>
                                     <th>Ref</th>
                                     <th>Actions</th>
                                 </tr>
@@ -3902,20 +3953,21 @@
                                 </div>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">Cost Price (&#8377;)</label>
-                                <input type="number" class="form-control" id="pmCostPriceNew" step="0.01" value="0">
-                            </div>
-                            <div class="col-md-6">
                                 <label class="form-label">Selling Price (&#8377;)</label>
                                 <input type="number" class="form-control" id="pmSellingPriceNew" step="0.01" value="0">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">HSN/SAC</label>
-                                <input type="text" class="form-control" id="pmHsnNew" placeholder="Auto" maxlength="10">
+                                <label class="form-label">Labour Cost / Product (&#8377;)</label>
+                                <input type="number" class="form-control" id="pmLabourCostPerProductNew" min="0"
+                                    step="0.01" value="0">
                             </div>
-                            <div class="col-md-6">
-                                <label class="form-label">GST %</label>
-                                <input type="number" class="form-control" id="pmGstRateNew" step="0.01" value="18">
+                            <div class="col-12">
+                                <label class="form-label fw-bold">Raw Materials Recipe</label>
+                                <div id="pmRecipeContainer" class="p-2 bg-light rounded border"></div>
+                                <div class="d-flex justify-content-end mt-2">
+                                    <button type="button" class="btn btn-sm btn-outline-primary"
+                                        id="pmAddRecipeRowBtn"><i class="fas fa-plus me-1"></i>Add Raw Material</button>
+                                </div>
                             </div>
                             <div class="col-12">
                                 <label class="form-label">Product Image</label>
@@ -6180,5 +6232,4 @@
 
     <script src="js/pwa.js"></script>
 </body>
-
 </html>
