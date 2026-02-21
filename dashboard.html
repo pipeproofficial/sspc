@@ -695,8 +695,6 @@
                                 <tr>
                                     <th>Item</th>
                                     <th>Category</th>
-                                    <th>Pipe Type</th>
-                                    <th>Load Class</th>
                                     <th>HSN/SAC</th>
                                     <th>GST%</th>
                                     <th>Qty</th>
@@ -1096,7 +1094,7 @@
                 </div>
                 <div class="section-actions d-flex gap-2 align-items-center flex-nowrap">
                     <button class="btn btn-sm btn-primary" id="addProductionBtn">
-                        <i class="fas fa-hammer me-1"></i> New Run
+                        <i class="fas fa-hammer me-1"></i> Today's Production
                     </button>
                     <button class="btn btn-sm btn-outline-dark" id="toggleCompletedRunsBtn">
                         <i class="fas fa-eye me-1"></i> Completed
@@ -1108,7 +1106,7 @@
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
                             <li><button class="dropdown-item" type="button" data-bs-toggle="modal"
-                                    data-bs-target="#productMasterModal">Product Master</button></li>
+                                    data-bs-target="#productMasterModal">Pipe Category</button></li>
                             <li><button class="dropdown-item" type="button" data-bs-toggle="modal"
                                     data-bs-target="#locationMasterModal">Location Master</button></li>
                         </ul>
@@ -3716,9 +3714,9 @@
                             <div class="modal-section-title">Core Details</div>
                             <div class="row g-3">
                                 <div class="col-12">
-                                    <label class="form-label fw-bold">Product Master</label>
+                                    <label class="form-label fw-bold">Pipe Category</label>
                                     <select class="form-select" id="prodProductMaster">
-                                        <option value="">Select Product Master...</option>
+                                        <option value="">Select Pipe Category...</option>
                                     </select>
                                     <div class="form-text">Select the product to start production.</div>
                                     <div id="productDetails" class="form-text text-primary fw-bold mt-1"></div>
@@ -3740,12 +3738,13 @@
                                         <div class="d-flex justify-content-between align-items-center mb-2">
                                             <label class="form-label fw-bold mb-0">Multiple Products (Optional)</label>
                                             <button type="button" class="btn btn-sm btn-outline-primary"
-                                                id="addProductionLineBtn"><i class="fas fa-plus me-1"></i>Add Product
-                                                Line</button>
+                                                id="addProductionLineBtn"><i class="fas fa-plus me-1"></i>Add More
+                                                Pipes</button>
                                         </div>
                                         <div id="productionMultiLines" class="small"></div>
-                                        <div class="form-text">Add multiple products with separate labour rate for each
-                                            line. One click creates all runs.</div>
+                                        <div class="form-text">Add more pipes with separate labour rate for each line.
+                                            Raw materials are auto-detected from each Pipe Category recipe and deducted
+                                            automatically.</div>
                                     </div>
                                 </div>
                             </div>
@@ -3862,19 +3861,19 @@
         </div>
     </div>
 
-    <!-- Product Master Modal -->
+    <!-- Pipe Category Modal -->
     <div class="modal fade" id="productMasterModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Product Master</h5>
+                    <h5 class="modal-title">Pipe Category</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <form id="productMasterFormNew">
                         <div class="row g-3">
                             <div class="col-md-6">
-                                <label class="form-label">Product Category</label>
+                                <label class="form-label">Pipe Category</label>
                                 <div class="input-group">
                                     <select class="form-select" id="pmCategoryNew">
                                         <option value="RCC Pipe">RCC Pipe</option>
@@ -3890,34 +3889,6 @@
                             <div class="col-md-6">
                                 <label class="form-label">Product Name</label>
                                 <input type="text" class="form-control" id="pmNameNew" required>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Pipe Type</label>
-                                <div class="input-group">
-                                    <select class="form-select" id="pmPipeTypeNew">
-                                        <option value="Plain End">Plain End</option>
-                                        <option value="Socket & Spigot">Socket & Spigot</option>
-                                        <option value="Tongue and Groove or T/4">Tongue and Groove or T/4</option>
-                                    </select>
-                                    <button class="btn btn-outline-primary pm-option-add-btn" type="button"
-                                        data-option-type="pipeType">
-                                        <i class="fas fa-plus me-1"></i>Add
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Load Class</label>
-                                <div class="input-group">
-                                    <select class="form-select" id="pmLoadClassNew">
-                                        <option value="NP2">NP2</option>
-                                        <option value="NP3">NP3</option>
-                                        <option value="NP4">NP4</option>
-                                    </select>
-                                    <button class="btn btn-outline-primary pm-option-add-btn" type="button"
-                                        data-option-type="loadClass">
-                                        <i class="fas fa-plus me-1"></i>Add
-                                    </button>
-                                </div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Unit</label>
@@ -5894,10 +5865,105 @@
             #section-production .section-actions {
                 width: 100%;
                 justify-content: flex-start;
+                display: grid !important;
+                flex-wrap: initial !important;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.5rem;
             }
 
             #section-production .section-actions .btn {
                 width: 100%;
+                margin: 0 !important;
+            }
+
+            #section-production .section-actions .dropdown {
+                width: 100%;
+            }
+
+            #section-production .section-actions .dropdown .btn {
+                width: 100%;
+            }
+
+            #addProductionBtn,
+            #toggleCompletedRunsBtn,
+            #section-production .section-actions .dropdown .btn {
+                min-height: 40px;
+                white-space: nowrap;
+            }
+
+            #invoiceFormContainer .card-header {
+                align-items: stretch !important;
+                gap: 0.5rem;
+            }
+
+            #invoiceFormContainer .card-header>.d-flex.gap-2 {
+                width: 100%;
+                display: grid !important;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.5rem !important;
+            }
+
+            #invoiceLayoutSelect,
+            #invoiceCopyDropdownWrap,
+            #printInvoicePreviewBtn {
+                width: 100% !important;
+                min-width: 0;
+            }
+
+            #invoiceCopyDropdownBtn,
+            #printInvoicePreviewBtn {
+                width: 100%;
+                min-height: 40px;
+            }
+
+            #invoiceCopySummary {
+                display: inline-block;
+                max-width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                vertical-align: bottom;
+            }
+
+            #invoiceCopyDropdownWrap .dropdown-menu {
+                width: min(92vw, 320px);
+                max-width: 92vw;
+            }
+
+            #gstFormContainer .card-header {
+                align-items: stretch !important;
+                gap: 0.5rem;
+            }
+
+            #gstFormContainer .card-header>.d-flex.gap-2 {
+                width: 100%;
+                display: grid !important;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.5rem !important;
+            }
+
+            #gstDocType,
+            #gstTaxMode,
+            #printGstPreviewBtn {
+                width: 100% !important;
+                min-width: 0;
+            }
+
+            #printGstPreviewBtn {
+                min-height: 40px;
+            }
+
+            @media (max-width: 575.98px) {
+                #section-production .section-actions {
+                    grid-template-columns: 1fr;
+                }
+
+                #invoiceFormContainer .card-header>.d-flex.gap-2 {
+                    grid-template-columns: 1fr;
+                }
+
+                #gstFormContainer .card-header>.d-flex.gap-2 {
+                    grid-template-columns: 1fr;
+                }
             }
 
             .production-table thead th,
@@ -6050,6 +6116,7 @@
             .stat-card-mobile .h5 {
                 font-size: 1.1rem;
             }
+
         }
     </style>
 
@@ -6091,6 +6158,7 @@
     <script type="module" src="js/profit-loss.js"></script>
     <script type="module" src="js/audit.js"></script>
     <script type="module" src="js/payments.js"></script>
+    <script type="module" src="js/table-bulk-delete.js"></script>
 
     <!-- Daily Vehicle Alert Script -->
     <script>
