@@ -117,6 +117,35 @@ function inferHsnForFinishedGood(name = '', category = '') {
     return '';
 }
 
+function normalizeText(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function isSameFinishedGoodVariant(docData = {}, pm = {}) {
+    const nameOk = normalizeText(docData.name) === normalizeText(pm.name || pm.productName || '');
+    const categoryOk = normalizeText(docData.category) === normalizeText(pm.category || pm.productCategory || '');
+    const pipeOk = normalizeText(docData.pipeType) === normalizeText(pm.pipeType || '');
+    const loadOk = normalizeText(docData.loadClass) === normalizeText(pm.loadClass || '');
+    return nameOk && categoryOk && pipeOk && loadOk;
+}
+
+async function findFinishedGoodDoc(userRef, pm = {}) {
+    const pmId = String(pm.id || '').trim();
+    if (pmId) {
+        const byMaster = await userRef.collection('inventory').where('productMasterId', '==', pmId).limit(1).get();
+        if (!byMaster.empty) return byMaster.docs[0];
+    }
+
+    const fgName = pm.name || pm.productName || 'Product';
+    const byName = await userRef.collection('inventory').where('name', '==', fgName).get();
+    if (byName.empty) return null;
+
+    const exactVariant = byName.docs.find((doc) => isSameFinishedGoodVariant(doc.data() || {}, pm));
+    if (exactVariant) return exactVariant;
+
+    return null;
+}
+
 async function loadBusinessDefaults(businessId) {
     if (!businessId) {
         appDefaultGstRate = 0;
@@ -1175,11 +1204,9 @@ function populateProductMasterSelect() {
     }
     prodProductMasterSelect.innerHTML = '<option value="">Select Product Master...</option>';
     productMasterItems.forEach(p => {
-        const name = p.name || p.productName || 'Product';
-        const category = p.category || p.productCategory || '';
         const option = document.createElement('option');
         option.value = p.id;
-        option.textContent = category ? `${name} (${category})` : name;
+        option.textContent = formatProductMasterLabel(p);
         prodProductMasterSelect.appendChild(option);
     });
     refreshProductionLineOptions();
@@ -1213,7 +1240,7 @@ function populateSepticProductSelect() {
     septicProducts.forEach(p => {
         const option = document.createElement('option');
         option.value = p.id;
-        option.textContent = p.name || 'Septic Product';
+        option.textContent = formatProductMasterLabel(p);
         septicAllocationProductSelect.appendChild(option);
     });
 }
@@ -1226,6 +1253,14 @@ function normalizeLabourDate(value) {
     const m = String(dt.getMonth() + 1).padStart(2, '0');
     const d = String(dt.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
+}
+
+function formatProductMasterLabel(p = {}) {
+    const name = p.name || p.productName || 'Product';
+    const category = p.category || p.productCategory || '-';
+    const pipeType = p.pipeType || '-';
+    const loadClass = p.loadClass || '-';
+    return `${name} | ${category} | ${pipeType} | ${loadClass}`;
 }
 
 function roundMoney(value) {
@@ -1264,10 +1299,8 @@ function applyProductMasterSelection() {
 function buildProductionLineOptions(selectedId = '') {
     const base = '<option value="">Select Product...</option>';
     const options = (productMasterItems || []).map((p) => {
-        const name = p.name || p.productName || 'Product';
-        const category = p.category || p.productCategory || '';
         const selected = String(selectedId) === String(p.id) ? 'selected' : '';
-        return `<option value="${p.id}" ${selected}>${category ? `${name} (${category})` : name}</option>`;
+        return `<option value="${p.id}" ${selected}>${formatProductMasterLabel(p)}</option>`;
     }).join('');
     return `${base}${options}`;
 }
@@ -1627,17 +1660,21 @@ async function saveProductionRun() {
             const pm = item.pm;
             const fgName = pm.name || pm.productName || 'Product';
             if (productToFgId[pm.id]) continue;
-            const fgSnap = await userRef.collection('inventory').where('name', '==', fgName).limit(1).get();
-            const existingFg = fgSnap.empty ? null : (fgSnap.docs[0].data() || {});
+            const fgDoc = await findFinishedGoodDoc(userRef, pm);
+            const existingFg = fgDoc ? (fgDoc.data() || {}) : null;
             const resolvedHsn = resolveHsn(
                 pm.hsn,
                 existingFg?.hsn,
                 inferHsnForFinishedGood(fgName, pm.category || pm.productCategory || '')
             );
-            if (fgSnap.empty) {
+            if (!fgDoc) {
                 const fgRef = await userRef.collection('inventory').add({
                     name: fgName,
-                    category: 'Finished Goods',
+                    category: pm.category || pm.productCategory || 'Finished Goods',
+                    productType: pm.category || pm.productCategory || '',
+                    productMasterId: pm.id || null,
+                    pipeType: pm.pipeType || '',
+                    loadClass: pm.loadClass || '',
                     unit: pm.unit || 'Nos',
                     quantity: 0,
                     costPrice: Number(pm.costPrice || 0),
@@ -1650,10 +1687,15 @@ async function saveProductionRun() {
                 productToFgId[pm.id] = fgRef.id;
                 productToHsn[pm.id] = resolvedHsn;
             } else {
-                productToFgId[pm.id] = fgSnap.docs[0].id;
+                productToFgId[pm.id] = fgDoc.id;
                 productToHsn[pm.id] = resolvedHsn;
                 await userRef.collection('inventory').doc(productToFgId[pm.id]).set({
-                    category: 'Finished Goods',
+                    name: fgName,
+                    category: pm.category || pm.productCategory || 'Finished Goods',
+                    productType: pm.category || pm.productCategory || '',
+                    productMasterId: pm.id || null,
+                    pipeType: pm.pipeType || '',
+                    loadClass: pm.loadClass || '',
                     unit: pm.unit || 'Nos',
                     costPrice: Number(pm.costPrice || 0),
                     sellingPrice: Number(pm.sellingPrice || 0),
@@ -1888,7 +1930,11 @@ async function saveCuringComplete() {
                 if (fgExists) {
                     tx.update(fgRef, {
                         quantity: roundMoney(fgCurrentQty + goodIncrement),
-                        category: 'Finished Goods',
+                        category: run.productType || 'Finished Goods',
+                        productType: run.productType || '',
+                        productMasterId: run.productMasterId || null,
+                        pipeType: run.pipeType || '',
+                        loadClass: run.loadClass || '',
                         unit: run.unit || 'Nos',
                         costPrice: Number(run.costPrice || 0),
                         sellingPrice: Number(run.sellingPrice || 0),
@@ -1899,7 +1945,11 @@ async function saveCuringComplete() {
                 } else {
                     tx.set(fgRef, {
                         name: run.finishedGoodName || 'Finished Good',
-                        category: 'Finished Goods',
+                        category: run.productType || 'Finished Goods',
+                        productType: run.productType || '',
+                        productMasterId: run.productMasterId || null,
+                        pipeType: run.pipeType || '',
+                        loadClass: run.loadClass || '',
                         unit: run.unit || 'Nos',
                         quantity: roundMoney(goodIncrement),
                         costPrice: Number(run.costPrice || 0),
@@ -1944,18 +1994,22 @@ async function saveSepticAllocation() {
         const fgName = septicProduct.name || septicProduct.productName || 'Septic Assembly';
 
         // Find or create Finished Good
-        const fgSnap = await userRef.collection('inventory').where('name', '==', fgName).limit(1).get();
+        const fgDoc = await findFinishedGoodDoc(userRef, septicProduct);
         let fgId = '';
-        const existingFg = fgSnap.empty ? null : (fgSnap.docs[0].data() || {});
+        const existingFg = fgDoc ? (fgDoc.data() || {}) : null;
         const resolvedHsn = resolveHsn(
             septicProduct.hsn,
             existingFg?.hsn,
             inferHsnForFinishedGood(fgName, septicProduct.category || septicProduct.productCategory || '')
         );
-        if (fgSnap.empty) {
+        if (!fgDoc) {
             const fgRef = await userRef.collection('inventory').add({
                 name: fgName,
-                category: 'Finished Goods',
+                category: septicProduct.category || septicProduct.productCategory || 'Septic Tank',
+                productType: septicProduct.category || septicProduct.productCategory || 'Septic Tank',
+                productMasterId: septicProduct.id || null,
+                pipeType: septicProduct.pipeType || '',
+                loadClass: septicProduct.loadClass || '',
                 unit: septicProduct.unit || 'Nos',
                 quantity: 0,
                 costPrice: Number(septicProduct.costPrice || 0),
@@ -1967,9 +2021,14 @@ async function saveSepticAllocation() {
             });
             fgId = fgRef.id;
         } else {
-            fgId = fgSnap.docs[0].id;
+            fgId = fgDoc.id;
             await userRef.collection('inventory').doc(fgId).set({
-                category: 'Finished Goods',
+                name: fgName,
+                category: septicProduct.category || septicProduct.productCategory || 'Septic Tank',
+                productType: septicProduct.category || septicProduct.productCategory || 'Septic Tank',
+                productMasterId: septicProduct.id || null,
+                pipeType: septicProduct.pipeType || '',
+                loadClass: septicProduct.loadClass || '',
                 unit: septicProduct.unit || 'Nos',
                 costPrice: Number(septicProduct.costPrice || 0),
                 sellingPrice: Number(septicProduct.sellingPrice || 0),
@@ -2008,6 +2067,8 @@ async function saveSepticAllocation() {
                 date: new Date(),
                 finishedGoodId: fgId,
                 finishedGoodName: fgName,
+                productMasterId: septicProductId,
+                productMasterName: fgName,
                 productType: septicProduct.category || 'Septic Tank',
                 pipeType: septicProduct.pipeType || '',
                 loadClass: septicProduct.loadClass || '',
