@@ -48,6 +48,40 @@ function resolveGstRate(value, fallback = businessSettings.gstRate) {
     return Number.isFinite(fb) ? fb : 0;
 }
 
+function normalizeStateForTax(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function resolveGstTaxModeByStates(companyState, supplyState) {
+    const company = normalizeStateForTax(companyState);
+    const supply = normalizeStateForTax(supplyState);
+    if (!company || !supply) return 'CGST_SGST';
+    return company === supply ? 'CGST_SGST' : 'IGST';
+}
+
+function getCompanyStateForTax() {
+    return companyCache?.state || companyCache?.companyState || '';
+}
+
+function getSelectedCustomerState() {
+    const option = gstCustomer?.selectedOptions?.[0];
+    return option?.dataset?.state || '';
+}
+
+function getEffectivePlaceOfSupply() {
+    return (gstPlaceOfSupply?.value || '').trim() || String(getSelectedCustomerState() || '').trim();
+}
+
+function syncGstTaxModeFromState() {
+    const customerState = getSelectedCustomerState();
+    if (customerState && gstPlaceOfSupply && !gstPlaceOfSupply.value) {
+        setGstPlaceOfSupplyValue(customerState);
+    }
+    const mode = resolveGstTaxModeByStates(getCompanyStateForTax(), getEffectivePlaceOfSupply());
+    if (gstTaxMode) gstTaxMode.value = mode;
+    return mode;
+}
+
 function resolveItemPrice(item = {}) {
     return toFiniteNumber(
         item.sellingPrice ?? item.price ?? item.salePrice ?? item.rate ?? item.unitPrice ?? 0,
@@ -78,6 +112,30 @@ function isRawMaterialInventoryItem(item = {}) {
     if (source.includes('raw_material')) return true;
     const rawTokens = ['raw material', 'cement', 'sand', 'dust', 'aggregate', 'steel', 'fly ash', 'admixture', 'chemical'];
     return rawTokens.some(token => category.includes(token));
+}
+
+function normalizeItemText(value) {
+    return String(value || '').trim();
+}
+
+function buildItemMetaLine(item = {}) {
+    const parts = [
+        normalizeItemText(item.category || item.productCategory || item.productType || ''),
+        normalizeItemText(item.pipeType || ''),
+        normalizeItemText(item.loadClass || '')
+    ].filter(Boolean);
+    return parts.join(' | ');
+}
+
+function buildItemDisplayName(item = {}) {
+    const name = normalizeItemText(item.name || 'Item') || 'Item';
+    const meta = buildItemMetaLine(item);
+    return meta ? `${name} | ${meta}` : name;
+}
+
+function parseItemNameFromOption(option) {
+    if (!option) return 'Item';
+    return normalizeItemText(option.dataset.name || option.textContent || '') || 'Item';
 }
 
 function getGstDocAmount(doc = {}) {
@@ -133,10 +191,7 @@ function setupGstListeners() {
 
     if (gstCustomer) {
         gstCustomer.addEventListener('change', () => {
-            const option = gstCustomer.selectedOptions[0];
-            if (gstPlaceOfSupply && option?.dataset?.state && !gstPlaceOfSupply.value) {
-                setGstPlaceOfSupplyValue(option.dataset.state);
-            }
+            syncGstTaxModeFromState();
             updateGstPreview();
         });
     }
@@ -144,7 +199,12 @@ function setupGstListeners() {
     if (gstDocType) gstDocType.addEventListener('change', updateGstPreview);
     if (gstTaxMode) gstTaxMode.addEventListener('change', updateGstPreview);
     if (gstDate) gstDate.addEventListener('change', updateGstPreview);
-    if (gstPlaceOfSupply) gstPlaceOfSupply.addEventListener('change', updateGstPreview);
+    if (gstPlaceOfSupply) {
+        gstPlaceOfSupply.addEventListener('change', () => {
+            syncGstTaxModeFromState();
+            updateGstPreview();
+        });
+    }
     if (gstReverseCharge) gstReverseCharge.addEventListener('change', updateGstPreview);
     if (gstEwayBill) gstEwayBill.addEventListener('input', updateGstPreview);
     if (gstTransporter) gstTransporter.addEventListener('input', updateGstPreview);
@@ -189,6 +249,7 @@ async function initializeGstForm() {
         `;
     }
     await initializeStateSelect(gstPlaceOfSupply, { placeholder: 'Select State' });
+    syncGstTaxModeFromState();
     if (gstItemsContainer && !gstItemsContainer.children.length) {
         addGstItemRow();
     }
@@ -410,7 +471,11 @@ function addGstItemRow(item = {}) {
                     const hsn = resolveHsn(i.hsn, inferHsnFromItem(i));
                     const gst = resolveGstRate(i.gstRate, businessSettings.gstRate);
                     const price = resolveItemPrice(i);
-                    return `<option value="${i.id}" data-price="${price}" data-hsn="${hsn}" data-gst="${gst}">${i.name}</option>`;
+                    const category = normalizeItemText(i.category || i.productCategory || i.productType || '');
+                    const pipeType = normalizeItemText(i.pipeType || '');
+                    const loadClass = normalizeItemText(i.loadClass || '');
+                    const displayName = buildItemDisplayName({ name: i.name, category, pipeType, loadClass });
+                    return `<option value="${i.id}" data-name="${i.name || ''}" data-category="${category}" data-pipetype="${pipeType}" data-loadclass="${loadClass}" data-price="${price}" data-hsn="${hsn}" data-gst="${gst}">${displayName}</option>`;
                 }).join('')}
             </select>
         </td>
@@ -486,7 +551,10 @@ function collectGstItems() {
         const hsn = option?.dataset?.hsn || '';
         items.push({
             id: select.value,
-            name: option.textContent || '',
+            name: parseItemNameFromOption(option),
+            category: option?.dataset?.category || '',
+            pipeType: option?.dataset?.pipetype || '',
+            loadClass: option?.dataset?.loadclass || '',
             quantity: qty,
             price,
             gstRate,
@@ -511,6 +579,8 @@ function buildPreviewData(docNoOverride) {
     const option = gstCustomer?.selectedOptions?.[0];
     const customerName = option?.textContent || '';
     const docNo = docNoOverride || getGstDocNumber();
+    const placeOfSupply = getEffectivePlaceOfSupply();
+    const taxMode = syncGstTaxModeFromState();
 
     return {
         id: docNo,
@@ -533,9 +603,9 @@ function buildPreviewData(docNoOverride) {
         vehicle: gstVehicle?.value || '',
         transporter: gstTransporter?.value || '',
         ewayBill: gstEwayBill?.value || '',
-        placeOfSupply: gstPlaceOfSupply?.value || '',
+        placeOfSupply,
         reverseCharge: gstReverseCharge?.value || '',
-        taxMode: gstTaxMode?.value || 'CGST_SGST',
+        taxMode,
         docType: gstDocType?.value || 'Tax Invoice'
     };
 }
@@ -613,11 +683,13 @@ async function saveGstDocument() {
             const docNo = `${prefix}${String(next).padStart(pad, '0')}`;
             const total = calculateGstTotal();
             const paid = parseFloat(gstAmountPaid?.value || 0) || 0;
+            const placeOfSupply = getEffectivePlaceOfSupply();
+            const taxMode = resolveGstTaxModeByStates(getCompanyStateForTax(), placeOfSupply);
 
             const docData = {
                 docNo,
                 docType: gstDocType?.value || 'Tax Invoice',
-                taxMode: gstTaxMode?.value || 'CGST_SGST',
+                taxMode,
                 customerId: gstCustomer.value,
                 customerName: customerOption.textContent || '',
                 customerAddress: customerOption.dataset.address || '',
@@ -626,7 +698,7 @@ async function saveGstDocument() {
                 customerZip: customerOption.dataset.zip || '',
                 customerPhone: customerOption.dataset.phone || '',
                 customerTaxId: customerOption.dataset.taxid || '',
-                placeOfSupply: gstPlaceOfSupply?.value || '',
+                placeOfSupply,
                 reverseCharge: gstReverseCharge?.value || 'No',
                 ewayBill: gstEwayBill?.value || '',
                 transporter: gstTransporter?.value || '',
