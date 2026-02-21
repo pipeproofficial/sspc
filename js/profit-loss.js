@@ -79,6 +79,14 @@ function normalizeDate(val) {
     return new Date(val);
 }
 
+function getTransactionDirection(type = '') {
+    const normalized = String(type || '').trim().toLowerCase();
+    if (normalized === 'payment') return 'income';
+    if (normalized === 'supplierpayment' || normalized === 'salary payment') return 'expense';
+    if (normalized.includes('expense') || normalized.includes('purchase')) return 'expense';
+    return 'neutral';
+}
+
 function getDateRange() {
     if (!plStartDate || !plEndDate) return { start: null, end: null };
     const start = new Date(plStartDate.value);
@@ -108,19 +116,10 @@ function startProfitLossListeners() {
     const txnQuery = start && end
         ? basePath.collection('transactions').where('date', '>=', start).where('date', '<=', end)
         : basePath.collection('transactions');
-    const purchasesQuery = start && end
-        ? basePath.collection('purchases').where('date', '>=', start).where('date', '<=', end)
-        : basePath.collection('purchases');
-    const vehicleExpQuery = start && end
-        ? basePath.collection('vehicle_expenses').where('date', '>=', start).where('date', '<=', end)
-        : basePath.collection('vehicle_expenses');
-
     let txnData = [];
-    let purchaseData = [];
-    let vehicleData = [];
 
     const rebuild = () => {
-        const combined = [...txnData, ...purchaseData, ...vehicleData]
+        const combined = [...txnData]
             .sort((a, b) => (b.date || 0) - (a.date || 0));
         plTransactions = combined;
         applyFilters();
@@ -166,7 +165,7 @@ function startProfitLossListeners() {
                     return;
                 }
 
-                const direction = (type === 'SupplierPayment') ? 'neutral' : 'neutral';
+                const direction = getTransactionDirection(type);
                 const amount = t.amount ?? 0;
                 txnData.push({
                     id: doc.id,
@@ -249,59 +248,7 @@ function startProfitLossListeners() {
         }
     );
 
-    const purchasesUnsub = purchasesQuery.onSnapshot(
-        (snap) => {
-            purchaseData = [];
-            snap.forEach(doc => {
-                const p = doc.data();
-                purchaseData.push({
-                    id: doc.id,
-                    source: 'purchase',
-                    type: 'Purchase',
-                    date: normalizeDate(p.date),
-                    description: `Purchase: ${p.itemName || 'Inventory'}`,
-                    party: p.supplier || '-',
-                    ref: p.invoiceNo || '-',
-                    amount: p.totalCost ?? 0,
-                    direction: 'expense'
-                });
-            });
-            rebuild();
-        },
-        (error) => {
-            console.error('Error loading profit & loss data:', error);
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading data</td></tr>';
-            showAlert('danger', 'Failed to load profit & loss data.');
-        }
-    );
-
-    const vehicleUnsub = vehicleExpQuery.onSnapshot(
-        (snap) => {
-            vehicleData = [];
-            snap.forEach(doc => {
-                const v = doc.data();
-                vehicleData.push({
-                    id: doc.id,
-                    source: 'vehicle',
-                    type: 'Vehicle Expense',
-                    date: normalizeDate(v.date),
-                    description: v.description || v.type || 'Vehicle Expense',
-                    party: v.vehicle || '-',
-                    ref: v.type || '-',
-                    amount: v.amount ?? 0,
-                    direction: 'expense'
-                });
-            });
-            rebuild();
-        },
-        (error) => {
-            console.error('Error loading profit & loss data:', error);
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading data</td></tr>';
-            showAlert('danger', 'Failed to load profit & loss data.');
-        }
-    );
-
-    plUnsubscribers = [txnUnsub, purchasesUnsub, vehicleUnsub];
+    plUnsubscribers = [txnUnsub];
 }
 
 function applyFilters() {
@@ -314,8 +261,8 @@ function applyFilters() {
         if (typeFilter === 'invoice' && t.type !== 'Invoice') return false;
         if (typeFilter === 'payment' && t.type !== 'Payment') return false;
         if (typeFilter === 'supplier' && t.type !== 'SupplierPayment') return false;
-        if (typeFilter === 'purchase' && t.source !== 'purchase') return false;
-        if (typeFilter === 'vehicle' && t.source !== 'vehicle') return false;
+        if (typeFilter === 'purchase' && !(t.source === 'purchase' || String(t.type || '').toLowerCase().includes('purchase'))) return false;
+        if (typeFilter === 'vehicle' && !(t.source === 'vehicle' || String(t.type || '').toLowerCase().includes('vehicle'))) return false;
 
         if (!searchTerm) return true;
         const haystack = `${t.type} ${t.description} ${t.party} ${t.ref}`.toLowerCase();
