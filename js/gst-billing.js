@@ -36,6 +36,63 @@ let customerCache = [];
 let businessSettings = { gstRate: 0, gstInvoicePrefix: '', gstInvoicePad: 4, gstInvoiceNextNumber: 1 };
 let companyCache = null;
 
+function toFiniteNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function resolveGstRate(value, fallback = businessSettings.gstRate) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+    const fb = Number(fallback);
+    return Number.isFinite(fb) ? fb : 0;
+}
+
+function resolveItemPrice(item = {}) {
+    return toFiniteNumber(
+        item.sellingPrice ?? item.price ?? item.salePrice ?? item.rate ?? item.unitPrice ?? 0,
+        0
+    );
+}
+
+function resolveHsn(value, ...fallbacks) {
+    const candidates = [value, ...fallbacks];
+    for (const candidate of candidates) {
+        const normalized = String(candidate ?? '').trim();
+        if (normalized) return normalized;
+    }
+    return '';
+}
+
+function inferHsnFromItem(item = {}) {
+    const text = `${item?.name || ''} ${item?.category || ''}`.toLowerCase();
+    if (!text.trim()) return '';
+    if (/(rcc|pipe|septic|tank|manhole|concrete|cement)/.test(text)) return '6810';
+    if (/(steel|tmt|bar|rod)/.test(text)) return '7214';
+    return '';
+}
+
+function isRawMaterialInventoryItem(item = {}) {
+    const category = String(item.category || '').trim().toLowerCase();
+    const source = String(item.source || '').trim().toLowerCase();
+    if (source.includes('raw_material')) return true;
+    const rawTokens = ['raw material', 'cement', 'sand', 'dust', 'aggregate', 'steel', 'fly ash', 'admixture', 'chemical'];
+    return rawTokens.some(token => category.includes(token));
+}
+
+function getGstDocAmount(doc = {}) {
+    const direct = toFiniteNumber(doc.amount ?? doc.total ?? doc.totalAmount ?? doc.grandTotal, NaN);
+    if (Number.isFinite(direct)) return direct;
+    const items = Array.isArray(doc.items) ? doc.items : [];
+    const subtotal = items.reduce((sum, i) => {
+        const qty = toFiniteNumber(i.quantity, 0);
+        const price = toFiniteNumber(i.price ?? i.rate ?? i.unitPrice ?? i.sellingPrice, 0);
+        const gstRate = resolveGstRate(i.gstRate ?? i.gst, 0);
+        return sum + (qty * price) + (qty * price * gstRate / 100);
+    }, 0);
+    return subtotal + toFiniteNumber(doc.transportCost, 0);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     await checkAuth();
     if (!gstTable) return;
@@ -168,7 +225,7 @@ async function loadBusinessSettings() {
     if (!doc.exists) return;
     const data = doc.data();
     businessSettings = {
-        gstRate: Number(data.gstRate || 0),
+        gstRate: Number(data.gstRate ?? 0) || 0,
         gstInvoicePrefix: data.gstInvoicePrefix || '',
         gstInvoicePad: data.gstInvoicePad ?? 4,
         gstInvoiceNextNumber: data.gstInvoiceNextNumber ?? 1
@@ -222,10 +279,36 @@ async function loadInventory() {
     if (!user) return;
     const businessId = user.businessId || user.uid;
 
-    const snapshot = await db.collection('users').doc(businessId).collection('inventory').orderBy('name').get();
+    const [snapshot, productSnap] = await Promise.all([
+        db.collection('users').doc(businessId).collection('inventory').orderBy('name').get(),
+        db.collection('users').doc(businessId).collection('product_master').get()
+    ]);
+    const productMetaByName = new Map();
+    productSnap.forEach((doc) => {
+        const p = doc.data() || {};
+        const key = String(p.name || p.productName || '').trim().toLowerCase();
+        if (!key) return;
+        productMetaByName.set(key, {
+            hsn: resolveHsn(p.hsn, inferHsnFromItem(p)),
+            gstRate: Number(p.gstRate ?? 0) || 0
+        });
+    });
     inventoryCache = [];
     snapshot.forEach(doc => {
-        inventoryCache.push({ id: doc.id, ...doc.data() });
+        const item = { id: doc.id, ...doc.data() };
+        const key = String(item.name || '').trim().toLowerCase();
+        const meta = productMetaByName.get(key);
+        if (meta) {
+            item.hsn = resolveHsn(item.hsn, meta.hsn, inferHsnFromItem(item));
+            if (!(Number(item.gstRate) > 0) && Number(meta.gstRate) > 0) {
+                item.gstRate = Number(meta.gstRate);
+            }
+        } else {
+            item.hsn = resolveHsn(item.hsn, inferHsnFromItem(item));
+        }
+        if (isRawMaterialInventoryItem(item)) return;
+        if (toFiniteNumber(item.quantity, 0) <= 0) return;
+        inventoryCache.push(item);
     });
 }
 
@@ -260,7 +343,7 @@ function renderGstTable(data) {
     }
     tbody.innerHTML = data.map(doc => {
         const dateStr = doc.date ? formatDate(doc.date) : '';
-        const amount = Number(doc.amount || 0);
+        const amount = getGstDocAmount(doc);
         return `
             <tr>
                 <td>${dateStr}</td>
@@ -324,9 +407,10 @@ function addGstItemRow(item = {}) {
             <select class="form-select form-select-sm gst-item-select">
                 <option value="">Select item</option>
                 ${inventoryCache.map(i => {
-                    const hsn = i.hsn || '';
-                    const gst = i.gstRate ?? businessSettings.gstRate ?? 0;
-                    return `<option value="${i.id}" data-price="${i.sellingPrice || 0}" data-hsn="${hsn}" data-gst="${gst}">${i.name}</option>`;
+                    const hsn = resolveHsn(i.hsn, inferHsnFromItem(i));
+                    const gst = resolveGstRate(i.gstRate, businessSettings.gstRate);
+                    const price = resolveItemPrice(i);
+                    return `<option value="${i.id}" data-price="${price}" data-hsn="${hsn}" data-gst="${gst}">${i.name}</option>`;
                 }).join('')}
             </select>
         </td>
@@ -363,9 +447,9 @@ function updateGstRow(row) {
 
     const option = select.selectedOptions[0];
     const hsn = option?.dataset?.hsn || '-';
-    const gstRate = parseFloat(option?.dataset?.gst || businessSettings.gstRate || 0) || 0;
-    const price = priceInput ? parseFloat(priceInput.value || 0) || 0 : 0;
-    const qty = qtyInput ? parseFloat(qtyInput.value || 0) || 0 : 0;
+    const gstRate = resolveGstRate(option?.dataset?.gst, businessSettings.gstRate);
+    const price = priceInput ? toFiniteNumber(priceInput.value, 0) : 0;
+    const qty = qtyInput ? toFiniteNumber(qtyInput.value, 0) : 0;
 
     if (option && priceInput && select.value !== priceInput.dataset.itemId) {
         priceInput.value = option.dataset.price || priceInput.value;
@@ -383,10 +467,10 @@ function updateGstRow(row) {
 
 function calculateGstTotal() {
     const items = collectGstItems();
-    const transport = parseFloat(gstTransportCost?.value || 0) || 0;
+    const transport = toFiniteNumber(gstTransportCost?.value, 0);
     const total = items.reduce((sum, i) => sum + (i.price * i.quantity) + (i.price * i.quantity * i.gstRate / 100), 0);
     const grand = total + transport;
-    if (gstGrandTotal) gstGrandTotal.textContent = `₹${grand.toLocaleString()}`;
+    if (gstGrandTotal) gstGrandTotal.textContent = `₹${grand.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
     return grand;
 }
 
@@ -396,9 +480,9 @@ function collectGstItems() {
         const select = row.querySelector('.gst-item-select');
         if (!select || !select.value) return;
         const option = select.selectedOptions[0];
-        const qty = parseFloat(row.querySelector('.gst-qty')?.value || 0) || 0;
-        const price = parseFloat(row.querySelector('.gst-price')?.value || 0) || 0;
-        const gstRate = parseFloat(option?.dataset?.gst || businessSettings.gstRate || 0) || 0;
+        const qty = toFiniteNumber(row.querySelector('.gst-qty')?.value, 0);
+        const price = toFiniteNumber(row.querySelector('.gst-price')?.value, 0);
+        const gstRate = resolveGstRate(option?.dataset?.gst, businessSettings.gstRate);
         const hsn = option?.dataset?.hsn || '';
         items.push({
             id: select.value,
@@ -473,6 +557,7 @@ function printGstPreview() {
 
 function printGstDocument(docData) {
     const docDate = docData?.date?.toDate ? docData.date.toDate() : new Date(docData?.date || Date.now());
+    const resolvedAmount = getGstDocAmount(docData || {});
     const payload = {
         ...docData,
         id: docData?.id || docData?.docNo || 'GST',
@@ -480,6 +565,7 @@ function printGstDocument(docData) {
         dateStr: docData?.dateStr || formatDate(docDate),
         customer: docData?.customer || docData?.customerName || '',
         company: { ...(companyCache || {}), ...(docData?.company || {}) },
+        amount: resolvedAmount,
         copyLabel: docData?.copyLabel || 'ORIGINAL'
     };
     const html = window.getInvoiceTemplate('original', payload);
