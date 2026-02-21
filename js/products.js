@@ -13,6 +13,27 @@ function sanitizePhone(value) {
     return String(value).replace(/[^\d]/g, '');
 }
 
+function resolveBusinessContacts(publicData = {}) {
+    const rawPhone = String(
+        publicData.phone
+        || publicData.companyPhone
+        || publicData.mobile
+        || publicData.phoneNumber
+        || ''
+    ).trim();
+    const phoneDigits = sanitizePhone(rawPhone);
+    const displayPhone = rawPhone || (phoneDigits ? `+${phoneDigits}` : '');
+    const email = String(publicData.email || publicData.companyEmail || '').trim();
+    const rawWhatsapp = String(
+        publicData.whatsapp
+        || publicData.companyWhatsapp
+        || publicData.whatsappNumber
+        || ''
+    ).trim();
+    const whatsappDigits = sanitizePhone(rawWhatsapp || phoneDigits);
+    return { phoneDigits, displayPhone, email, whatsappDigits };
+}
+
 function normalizeCategory(item = {}) {
     const raw = String(item.productCategory || item.category || item.type || '').toLowerCase();
     const name = String(item.name || '').toLowerCase();
@@ -24,10 +45,7 @@ function normalizeCategory(item = {}) {
 
 function applyProductsBusinessInfo(publicData = {}) {
     const companyName = String(publicData.companyName || publicData.businessName || 'SSPC').trim() || 'SSPC';
-    const rawPhone = String(publicData.phone || publicData.companyPhone || '').trim();
-    const phoneDigits = sanitizePhone(rawPhone);
-    const displayPhone = rawPhone || (phoneDigits ? `+${phoneDigits}` : '');
-    const email = String(publicData.email || publicData.companyEmail || '').trim();
+    const { phoneDigits, displayPhone, email } = resolveBusinessContacts(publicData);
 
     const companyNameEl = document.getElementById('productsFooterCompanyName');
     if (companyNameEl) companyNameEl.textContent = companyName;
@@ -167,8 +185,9 @@ async function loadProducts() {
         const publicDoc = await db.collection('public').doc(businessId).get();
         const publicData = publicDoc.exists ? publicDoc.data() : {};
         applyProductsBusinessInfo(publicData);
-        contactPhone = sanitizePhone(publicData.phone || publicData.companyPhone || '');
-        contactWhatsapp = sanitizePhone(publicData.whatsapp || publicData.companyWhatsapp || contactPhone);
+        const contacts = resolveBusinessContacts(publicData);
+        contactPhone = contacts.phoneDigits;
+        contactWhatsapp = contacts.whatsappDigits;
 
         if (featuredStockUnsubscribe) {
             featuredStockUnsubscribe();
