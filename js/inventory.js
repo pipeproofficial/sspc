@@ -20,16 +20,54 @@ let currentItemId = null;
 let inventoryData = [];
 let productImageMap = new Map();
 let productCategoryMap = new Map();
+let productMetaMap = new Map();
+let productInfoMap = new Map();
+let appDefaultGstRate = 0;
 
-const RAW_CATEGORIES = ['Raw Materials', 'Cement', 'Sand', 'Aggregate', 'Steel', 'Fly Ash', 'Admixtures', 'Chemicals'];
+function resolveGstRate(value, fallback = appDefaultGstRate) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+    const fb = Number(fallback);
+    return Number.isFinite(fb) ? fb : 0;
+}
+
+async function loadBusinessDefaults(businessId) {
+    if (!businessId) {
+        appDefaultGstRate = 0;
+        return;
+    }
+    try {
+        const doc = await db.collection('users').doc(businessId).collection('settings').doc('business').get();
+        const data = doc.exists ? (doc.data() || {}) : {};
+        appDefaultGstRate = Number(data.gstRate ?? 0) || 0;
+    } catch (error) {
+        console.warn('Failed to load inventory business defaults', error);
+        appDefaultGstRate = 0;
+    }
+}
+
+const RAW_CATEGORIES = ['Raw Materials', 'Cement', 'Sand', 'Dust', 'Aggregate', 'Steel', 'Fly Ash', 'Admixtures', 'Chemicals'];
+
+function isRawMaterialItem(item = {}) {
+    const category = String(item.category || '').trim().toLowerCase();
+    const source = String(item.source || '').trim().toLowerCase();
+    if (source.includes('raw_material')) return true;
+    if (!category) return false;
+    const rawTokens = ['raw material', 'cement', 'sand', 'dust', 'aggregate', 'steel', 'fly ash', 'admixture', 'chemical'];
+    return rawTokens.some(token => category.includes(token));
+}
 
 function buildFeaturedStockPayload(item = {}) {
     const nameKey = (item.name || '').toLowerCase().trim();
-    const fallbackCategory = nameKey ? (productCategoryMap.get(nameKey) || '') : '';
-    const resolvedCategory = item.category || item.type || fallbackCategory || 'Other';
+    const productInfo = nameKey ? (productInfoMap.get(nameKey) || {}) : {};
+    const fallbackCategory = productInfo.category || productCategoryMap.get(nameKey) || '';
+    const resolvedCategory = productInfo.category || item.category || item.type || fallbackCategory || 'Other';
     return {
         name: item.name || 'Item',
         category: resolvedCategory,
+        productCategory: productInfo.category || '',
+        pipeType: productInfo.pipeType || '',
+        loadClass: productInfo.loadClass || '',
         type: item.type || '',
         description: item.description || '',
         sku: item.sku || '',
@@ -62,6 +100,7 @@ async function loadInventory() {
 
     if (!user || !inventoryTable) return;
     const businessId = user.businessId || user.uid;
+    await loadBusinessDefaults(businessId);
 
     try {
         // Destroy existing DataTable if it exists to prevent errors when modifying DOM
@@ -74,13 +113,31 @@ async function loadInventory() {
             .get();
         productImageMap = new Map();
         productCategoryMap = new Map();
+        productMetaMap = new Map();
+        productInfoMap = new Map();
         productSnapshot.forEach(doc => {
             const p = doc.data();
+            const key = (p?.name || '').toLowerCase();
             if (p?.name && p?.imageUrl) {
-                productImageMap.set(p.name.toLowerCase(), p.imageUrl);
+                productImageMap.set(key, p.imageUrl);
             }
             if (p?.name && (p?.category || p?.productCategory)) {
-                productCategoryMap.set(p.name.toLowerCase(), p.category || p.productCategory);
+                productCategoryMap.set(key, p.category || p.productCategory);
+            }
+            if (p?.name) {
+                productInfoMap.set(key, {
+                    category: p.category || p.productCategory || '',
+                    pipeType: p.pipeType || '',
+                    loadClass: p.loadClass || ''
+                });
+            }
+            if (p?.name) {
+                productMetaMap.set(key, {
+                    costPrice: Number(p.costPrice || 0),
+                    sellingPrice: Number(p.sellingPrice || 0),
+                    hsn: p.hsn || '',
+                    gstRate: resolveGstRate(p.gstRate)
+                });
             }
         });
 
@@ -97,7 +154,7 @@ async function loadInventory() {
         if (inventorySnapshot.empty) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="text-center py-4">
+                    <td colspan="10" class="text-center py-4">
                         <i class="fas fa-boxes fa-3x text-muted mb-3"></i>
                         <p class="text-muted">No finished goods found. Create products in Production > Masters.</p>
                     </td>
@@ -115,12 +172,31 @@ async function loadInventory() {
             };
             allInventoryItems.push(item);
 
-            // Filter out Raw Materials (handled in Separate Section)
-            if (RAW_CATEGORIES.includes(item.category)) return;
+            // Keep Inventory page focused on finished goods only.
+            if (isRawMaterialItem(item) || RAW_CATEGORIES.includes(item.category)) return;
 
             if (!item.imageUrl && item.name) {
                 const fallbackUrl = productImageMap.get(item.name.toLowerCase());
                 if (fallbackUrl) item.imageUrl = fallbackUrl;
+            }
+            if (item.name) {
+                const info = productInfoMap.get(item.name.toLowerCase());
+                if (info) {
+                    if (info.category && (!item.category || String(item.category).toLowerCase().includes('finished'))) {
+                        item.category = info.category;
+                    }
+                    if (info.pipeType && !item.pipeType) item.pipeType = info.pipeType;
+                    if (info.loadClass && !item.loadClass) item.loadClass = info.loadClass;
+                }
+                const meta = productMetaMap.get(item.name.toLowerCase());
+                if (meta) {
+                    if ((item.hsn || '') === '') item.hsn = meta.hsn || '';
+                    item.gstRate = resolveGstRate(item.gstRate, meta.gstRate);
+                    if (item.costPrice === undefined || item.costPrice === null || Number(item.costPrice) === 0) item.costPrice = Number(meta.costPrice || 0);
+                    if (item.sellingPrice === undefined || item.sellingPrice === null || Number(item.sellingPrice) === 0) item.sellingPrice = Number(meta.sellingPrice || 0);
+                } else {
+                    item.gstRate = resolveGstRate(item.gstRate);
+                }
             }
 
             inventoryData.push(item);
@@ -229,13 +305,12 @@ function createInventoryRow(item) {
                 </div>
             </td>
             <td>${item.category}</td>
-            <td>${item.description || '-'}</td>
+            <td>${item.pipeType || '-'}</td>
+            <td>${item.loadClass || '-'}</td>
             <td>${item.hsn || '-'}</td>
             <td>${item.gstRate === 0 ? '0%' : (item.gstRate ? `${item.gstRate}%` : '-')}</td>
             <td class="${stockClass}">${item.quantity}</td>
-            <td>${item.reorderLevel}</td>
             <td>${item.unit}</td>
-            <td>₹${parseFloat(item.costPrice || 0).toFixed(2)}</td>
             <td>₹${parseFloat(item.sellingPrice || 0).toFixed(2)}</td>
             <td>
                 <div class="btn-group btn-group-sm">
@@ -432,13 +507,12 @@ function getInventoryExportRows() {
     return inventoryData.map(item => ([
         item.name || '',
         item.category || '',
-        item.description || '',
+        item.pipeType || '',
+        item.loadClass || '',
         item.hsn || '',
         item.gstRate ?? '',
         item.quantity ?? 0,
-        item.reorderLevel ?? 0,
         item.unit || '',
-        item.costPrice ?? 0,
         item.sellingPrice ?? 0
     ]));
 }
@@ -449,7 +523,7 @@ function exportInventoryCSV() {
         return;
     }
 
-    const headers = ['Item', 'Category', 'Description', 'HSN/SAC', 'GST%', 'Qty', 'Reorder', 'Unit', 'Cost', 'Price'];
+    const headers = ['Item', 'Category', 'Pipe Type', 'Load Class', 'HSN/SAC', 'GST%', 'Qty', 'Unit', 'Price'];
     const rows = getInventoryExportRows();
     const filename = `inventory_${new Date().toISOString().split('T')[0]}.csv`;
     downloadCSV(filename, headers, rows);
@@ -461,7 +535,7 @@ function exportInventoryPDF() {
         return;
     }
 
-    const headers = ['Item', 'Category', 'Description', 'HSN/SAC', 'GST%', 'Qty', 'Reorder', 'Unit', 'Cost', 'Price'];
+    const headers = ['Item', 'Category', 'Pipe Type', 'Load Class', 'HSN/SAC', 'GST%', 'Qty', 'Unit', 'Price'];
     const rows = getInventoryExportRows();
     const filename = `inventory_${new Date().toISOString().split('T')[0]}.pdf`;
     downloadPDF(filename, 'Inventory Report', headers, rows);
@@ -579,35 +653,39 @@ async function showEditModal(item) {
 async function showStockModal(item, type) {
     currentItemId = item.id;
 
-    const modalId = type === 'in' ? 'StockInModal' : 'StockOutModal';
+    const modalId = type === 'in' ? 'stockInModal' : 'stockOutModal';
     const modalElement = document.getElementById(modalId);
     const modalTitle = document.querySelector(`#${modalId} .modal-title`);
     const itemNameElement = document.querySelector(`#${modalId} .item-name`);
+    if (!modalElement || !modalTitle || !itemNameElement) {
+        console.error('Stock modal elements not found', { modalId });
+        return;
+    }
 
     if (type === 'in') {
         modalTitle.textContent = 'Stock In';
         itemNameElement.textContent = item.name;
         const today = new Date().toISOString().split('T')[0];
-        document.getElementById('StockInDate').value = today;
-        document.getElementById('StockInMaterialName').value = item.name || '';
-        document.getElementById('StockInQuantity').value = '';
-        document.getElementById('StockInCost').value = item.standardRate ?? item.costPrice ?? '';
-        document.getElementById('StockInTransportCost').value = 0;
-        document.getElementById('StockInTotal').value = '';
-        document.getElementById('StockInVehicleNo').value = '';
-        document.getElementById('StockInReceivedBy').value = '';
-        document.getElementById('StockInRemarks').value = '';
+        document.getElementById('stockInDate').value = today;
+        document.getElementById('stockInMaterialName').value = item.name || '';
+        document.getElementById('stockInQuantity').value = '';
+        document.getElementById('stockInCost').value = item.standardRate ?? item.costPrice ?? '';
+        document.getElementById('stockInTransportCost').value = 0;
+        document.getElementById('stockInTotal').value = '';
+        document.getElementById('stockInVehicleNo').value = '';
+        document.getElementById('stockInReceivedBy').value = '';
+        document.getElementById('stockInRemarks').value = '';
 
-        const unitSelect = document.getElementById('StockInUnit');
+        const unitSelect = document.getElementById('stockInUnit');
         if (unitSelect) unitSelect.value = item.unit || 'Bag';
 
         // populate Suppliers
-        await populateSupplierDropdown('StockInSupplier');
+        await populateSupplierDropdown('stockInSupplier');
 
-        const qtyEl = document.getElementById('StockInQuantity');
-        const costEl = document.getElementById('StockInCost');
-        const transportEl = document.getElementById('StockInTransportCost');
-        const totalEl = document.getElementById('StockInTotal');
+        const qtyEl = document.getElementById('stockInQuantity');
+        const costEl = document.getElementById('stockInCost');
+        const transportEl = document.getElementById('stockInTransportCost');
+        const totalEl = document.getElementById('stockInTotal');
         const updateTotal = () => {
             const qtyVal = parseFloat(qtyEl.value) || 0;
             const costVal = parseFloat(costEl.value) || 0;
@@ -624,13 +702,13 @@ async function showStockModal(item, type) {
     } else {
         modalTitle.textContent = 'Stock Out';
         itemNameElement.textContent = item.name;
-        document.getElementById('StockOutQuantity').value = '';
-        document.getElementById('StockOutReason').value = 'Project Use';
-        document.getElementById('StockOutProject').value = '';
-        document.getElementById('StockOutDriver').value = '';
+        document.getElementById('stockOutQuantity').value = '';
+        document.getElementById('stockOutReason').value = 'Project Use';
+        document.getElementById('stockOutProject').value = '';
+        document.getElementById('stockOutDriver').value = '';
 
         // populate Customers
-        const customerSelect = document.getElementById('StockOutCustomer');
+        const customerSelect = document.getElementById('stockOutCustomer');
         if (customerSelect) {
             customerSelect.innerHTML = '<option value="">Select Customer (Optional)</option>';
             const user = JSON.parse(localStorage.getItem('user'));
@@ -644,7 +722,7 @@ async function showStockModal(item, type) {
         }
 
         // populate Vehicles for Dispatch
-        const vehicleSelect = document.getElementById('StockOutVehicle');
+        const vehicleSelect = document.getElementById('stockOutVehicle');
         if (vehicleSelect) {
             vehicleSelect.innerHTML = '<option value="">Select Vehicle (Optional)</option>';
             const user = JSON.parse(localStorage.getItem('user'));
@@ -665,16 +743,16 @@ async function handleStockIn() {
     if (!currentItemId) return;
     const user = JSON.parse(localStorage.getItem('user'));
     const businessId = user.businessId || user.uid;
-    const qty = parseFloat(document.getElementById('StockInQuantity').value);
-    const cost = parseFloat(document.getElementById('StockInCost').value);
-    const supplier = document.getElementById('StockInSupplier').value;
-    const invoiceNo = document.getElementById('StockInInvoice').value;
-    const transportCost = parseFloat(document.getElementById('StockInTransportCost').value) || 0;
-    const purchaseDate = document.getElementById('StockInDate').value;
-    const vehicleNo = document.getElementById('StockInVehicleNo').value;
-    const unit = document.getElementById('StockInUnit').value;
-    const receivedBy = document.getElementById('StockInReceivedBy').value;
-    const remarks = document.getElementById('StockInRemarks').value;
+    const qty = parseFloat(document.getElementById('stockInQuantity').value);
+    const cost = parseFloat(document.getElementById('stockInCost').value);
+    const supplier = document.getElementById('stockInSupplier').value;
+    const invoiceNo = document.getElementById('stockInInvoice').value;
+    const transportCost = parseFloat(document.getElementById('stockInTransportCost').value) || 0;
+    const purchaseDate = document.getElementById('stockInDate').value;
+    const vehicleNo = document.getElementById('stockInVehicleNo').value;
+    const unit = document.getElementById('stockInUnit').value;
+    const receivedBy = document.getElementById('stockInReceivedBy').value;
+    const remarks = document.getElementById('stockInRemarks').value;
     const totalCost = (qty * cost) + transportCost;
 
     if (!qty || qty <= 0) {
@@ -728,7 +806,7 @@ async function handleStockIn() {
             }
         }
 
-        bootstrap.Modal.getInstance(document.getElementById('StockInModal')).hide();
+        bootstrap.Modal.getInstance(document.getElementById('stockInModal')).hide();
         showSuccess(`Added ${qty} units to Stock`);
         loadInventory();
         if (window.loadRawMaterials) window.loadRawMaterials();
@@ -743,8 +821,8 @@ async function handleStockOut() {
     if (!currentItemId) return;
     const user = JSON.parse(localStorage.getItem('user'));
     const businessId = user.businessId || user.uid;
-    const qty = parseInt(document.getElementById('StockOutQuantity').value);
-    const reason = document.getElementById('StockOutReason').value;
+    const qty = parseInt(document.getElementById('stockOutQuantity').value);
+    const reason = document.getElementById('stockOutReason').value;
 
     if (!qty || qty <= 0) {
         alert('Please enter a valid quantity');
@@ -753,10 +831,10 @@ async function handleStockOut() {
 
     try {
         const itemRef = db.collection('users').doc(businessId).collection('inventory').doc(currentItemId);
-        const customerName = document.getElementById('StockOutCustomer').value;
-        const project = document.getElementById('StockOutProject').value;
-        const vehicle = document.getElementById('StockOutVehicle').value;
-        const driver = document.getElementById('StockOutDriver').value;
+        const customerName = document.getElementById('stockOutCustomer').value;
+        const project = document.getElementById('stockOutProject').value;
+        const vehicle = document.getElementById('stockOutVehicle').value;
+        const driver = document.getElementById('stockOutDriver').value;
         let challanData = null;
 
         await db.runTransaction(async (transaction) => {
@@ -791,7 +869,7 @@ async function handleStockOut() {
             }
         });
 
-        bootstrap.Modal.getInstance(document.getElementById('StockOutModal')).hide();
+        bootstrap.Modal.getInstance(document.getElementById('stockOutModal')).hide();
         showSuccess(`Removed ${qty} units from Stock`);
 
         if (challanData) {
@@ -826,6 +904,7 @@ async function saveInventoryItem() {
         quantity: existingItem ? (existingItem.quantity || 0) : 0,
         reorderLevel: parseInt(document.getElementById('reorderLevel').value),
         unit: document.getElementById('unit').value,
+        gstRate: resolveGstRate(existingItem?.gstRate),
         costPrice: parseFloat(document.getElementById('costPrice').value) || 0,
         sellingPrice: parseFloat(document.getElementById('sellingPrice').value) || 0,
         supplier: document.getElementById('supplier') ? document.getElementById('supplier').value : '',
@@ -945,7 +1024,7 @@ function applyInventoryFilters() {
     const stockFilter = filterInventoryStock?.value || 'all';
 
     const filtered = inventoryData.filter(item => {
-        const text = `${item.name || ''} ${item.category || ''} ${item.description || ''} ${item.sku || ''} ${item.hsn || ''} ${item.gstRate || ''}`.toLowerCase();
+        const text = `${item.name || ''} ${item.category || ''} ${item.pipeType || ''} ${item.loadClass || ''} ${item.description || ''} ${item.sku || ''} ${item.hsn || ''} ${item.gstRate || ''}`.toLowerCase();
         if (searchTerm && !text.includes(searchTerm)) return false;
         if (categoryFilter !== 'all' && item.category !== categoryFilter) return false;
         const qty = Number(item.quantity || 0);
@@ -960,7 +1039,7 @@ function applyInventoryFilters() {
     if (!filtered.length) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="11" class="text-center py-4 text-muted">No items match the filters</td>
+                <td colspan="10" class="text-center py-4 text-muted">No items match the filters</td>
             </tr>
         `;
     } else {
