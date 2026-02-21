@@ -42,6 +42,75 @@ let companyCache = null;
 let companyCachePromise = null;
 let invoiceFormReady = false;
 
+function toFiniteNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function resolveGstRate(value, fallback = businessSettings.gstRate) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+    const fb = Number(fallback);
+    return Number.isFinite(fb) ? fb : 0;
+}
+
+function resolveHsn(value, ...fallbacks) {
+    const candidates = [value, ...fallbacks];
+    for (const candidate of candidates) {
+        const normalized = String(candidate ?? '').trim();
+        if (normalized) return normalized;
+    }
+    return '';
+}
+
+function inferHsnFromItem(item = {}) {
+    const text = `${item?.name || ''} ${item?.category || ''}`.toLowerCase();
+    if (!text.trim()) return '';
+    if (/(rcc|pipe|septic|tank|manhole|concrete|cement)/.test(text)) return '6810';
+    if (/(steel|tmt|bar|rod)/.test(text)) return '7214';
+    return '';
+}
+
+function resolveInvoiceItemPrice(item = {}) {
+    return toFiniteNumber(
+        item.sellingPrice ?? item.price ?? item.salePrice ?? item.rate ?? item.unitPrice ?? 0,
+        0
+    );
+}
+
+function getInvoiceAmount(inv = {}) {
+    const directCandidates = [
+        inv.amount,
+        inv.total,
+        inv.totalAmount,
+        inv.grandTotal,
+        inv.finalAmount,
+        inv.netAmount
+    ];
+    for (const candidate of directCandidates) {
+        const n = Number(candidate);
+        if (Number.isFinite(n)) return n;
+    }
+
+    const items = Array.isArray(inv.items) ? inv.items : [];
+    const itemsTotal = items.reduce((sum, item) => {
+        const qty = toFiniteNumber(item.quantity, 0);
+        const price = toFiniteNumber(item.price ?? item.rate ?? item.unitPrice ?? item.sellingPrice, 0);
+        const gstRate = toFiniteNumber(item.gstRate ?? item.gst, 0);
+        const finalRate = price + (price * gstRate / 100);
+        return sum + (qty * finalRate);
+    }, 0);
+    return itemsTotal + toFiniteNumber(inv.transportCost, 0);
+}
+
+function isRawMaterialInventoryItem(item = {}) {
+    const category = String(item.category || '').trim().toLowerCase();
+    const source = String(item.source || '').trim().toLowerCase();
+    if (source.includes('raw_material')) return true;
+    const rawTokens = ['raw material', 'cement', 'sand', 'dust', 'aggregate', 'steel', 'fly ash', 'admixture', 'chemical'];
+    return rawTokens.some(token => category.includes(token));
+}
+
 // Premium Invoice Templates with Preview System
 const invoiceTemplates = {
     modern: {
@@ -369,12 +438,15 @@ function setupEventListeners() {
             updateInvoicePreview();
         });
     }
-    ['invFontFamily', 'invFontScale', 'invBusinessNameOverride', 'invBusinessAddressOverride', 'invShowGstin']
+    ['invFontFamily', 'invFontScale', 'invBusinessNameOverride', 'invBusinessAddressOverride', 'invShowGstin', 'invEnableCustomTerms', 'invCustomTermsText']
         .forEach(id => {
             const el = document.getElementById(id);
             if (!el) return;
-            const ev = (id === 'invShowGstin' || id === 'invFontScale' || id === 'invFontFamily') ? 'change' : 'input';
-            el.addEventListener(ev, () => updateInvoicePreview());
+            const ev = (id === 'invShowGstin' || id === 'invFontScale' || id === 'invFontFamily' || id === 'invEnableCustomTerms') ? 'change' : 'input';
+            el.addEventListener(ev, () => {
+                if (id === 'invEnableCustomTerms') toggleInvoiceTermsEditor();
+                updateInvoicePreview();
+            });
         });
     const toggleDocDesignBtn = document.getElementById('toggleDocDesignBtn');
     if (toggleDocDesignBtn) {
@@ -384,8 +456,20 @@ function setupEventListeners() {
             panel.classList.toggle('d-none');
         });
     }
+    const fillDefaultTermsBtn = document.getElementById('invFillDefaultTermsBtn');
+    if (fillDefaultTermsBtn) {
+        fillDefaultTermsBtn.addEventListener('click', () => {
+            const enableEl = document.getElementById('invEnableCustomTerms');
+            const textEl = document.getElementById('invCustomTermsText');
+            if (enableEl && !enableEl.checked) enableEl.checked = true;
+            toggleInvoiceTermsEditor();
+            if (textEl) textEl.value = getDefaultInvoiceTermsText();
+            updateInvoicePreview();
+        });
+    }
     syncSaveInvoiceButtonLabel();
     updateDocumentModeUi();
+    toggleInvoiceTermsEditor();
 
     setupSignaturePad();
 
@@ -550,6 +634,11 @@ async function openInvoiceModal(options = {}) {
     if (bizAddressOverrideEl) bizAddressOverrideEl.value = '';
     const showGstinEl = document.getElementById('invShowGstin');
     if (showGstinEl) showGstinEl.checked = true;
+    const enableCustomTermsEl = document.getElementById('invEnableCustomTerms');
+    if (enableCustomTermsEl) enableCustomTermsEl.checked = false;
+    const customTermsTextEl = document.getElementById('invCustomTermsText');
+    if (customTermsTextEl) customTermsTextEl.value = '';
+    toggleInvoiceTermsEditor();
     document.getElementById('invBalance').textContent = '₹0.00';
     syncSaveInvoiceButtonLabel();
     updateDocumentModeUi();
@@ -571,11 +660,12 @@ async function openInvoiceModal(options = {}) {
     custSelect.innerHTML = '<option value="">Loading...</option>';
     
     try {
-        const [custSnap, invSnap, vehicleSnap, projectSnap] = await Promise.all([
+        const [custSnap, invSnap, vehicleSnap, projectSnap, productSnap] = await Promise.all([
             db.collection('users').doc(businessId).collection('customers').orderBy('name').get(),
-            db.collection('users').doc(businessId).collection('inventory').where('category', 'in', ['RCC Pipe', 'RCC Pipes', 'Septic Tank', 'Septic Tank Product', 'Septic Tank Products', 'Water Tank', 'Water Tank Products']).get(),
+            db.collection('users').doc(businessId).collection('inventory').get(),
             db.collection('users').doc(businessId).collection('vehicles').get(),
-            db.collection('users').doc(businessId).collection('orders').where('status', 'in', ['Pending', 'Processing', 'Dispatched']).get()
+            db.collection('users').doc(businessId).collection('orders').where('status', 'in', ['Pending', 'Processing', 'Dispatched']).get(),
+            db.collection('users').doc(businessId).collection('product_master').get()
         ]);
 
         custSelect.innerHTML = '<option value="">Select Customer...</option>';
@@ -624,7 +714,34 @@ async function openInvoiceModal(options = {}) {
             companyCache = {};
         }
 
-        inventoryCache = invSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const productMetaByName = new Map();
+        productSnap.forEach((doc) => {
+            const p = doc.data() || {};
+            const key = String(p.name || p.productName || '').trim().toLowerCase();
+            if (!key) return;
+            productMetaByName.set(key, {
+                hsn: resolveHsn(p.hsn, inferHsnFromItem(p)),
+                gstRate: Number(p.gstRate ?? 0) || 0
+            });
+        });
+
+        inventoryCache = invSnap.docs
+            .map(doc => {
+                const item = { id: doc.id, ...doc.data() };
+                const key = String(item.name || '').trim().toLowerCase();
+                const meta = productMetaByName.get(key);
+                if (meta) {
+                    item.hsn = resolveHsn(item.hsn, meta.hsn, inferHsnFromItem(item));
+                    if (!(Number(item.gstRate) > 0) && Number(meta.gstRate) > 0) {
+                        item.gstRate = Number(meta.gstRate);
+                    }
+                } else {
+                    item.hsn = resolveHsn(item.hsn, inferHsnFromItem(item));
+                }
+                return item;
+            })
+            .filter(item => !isRawMaterialInventoryItem(item))
+            .filter(item => Number(item.quantity || 0) > 0);
         
         addInvoiceItemRow(); // Add first row
 
@@ -681,9 +798,11 @@ window.addEventListener('customerCreated', (e) => {
 function addInvoiceItemRow(prefill = {}) {
     const defaultGst = Number(businessSettings.gstRate || 0);
     const options = inventoryCache.map(i => {
-        const gstRate = (i.gstRate ?? defaultGst);
-        const hsn = i.hsn || '';
-        return `<option value="${i.id}" data-price="${i.sellingPrice || 0}" data-cost="${i.costPrice || 0}" data-hsn="${hsn}" data-gst="${gstRate}">${i.name} (Stock: ${i.quantity})</option>`;
+        const gstRate = resolveGstRate(i.gstRate, defaultGst);
+        const hsn = resolveHsn(i.hsn, inferHsnFromItem(i));
+        const sellingPrice = resolveInvoiceItemPrice(i);
+        const costPrice = toFiniteNumber(i.costPrice ?? i.purchasePrice, 0);
+        return `<option value="${i.id}" data-price="${sellingPrice}" data-cost="${costPrice}" data-hsn="${hsn}" data-gst="${gstRate}">${i.name} (Stock: ${i.quantity})</option>`;
     }).join('');
     
     const html = `
@@ -723,8 +842,9 @@ function addInvoiceItemRow(prefill = {}) {
 // Expose to window for inline onchange
 window.updateRowPrice = (select) => {
     const option = select.selectedOptions[0];
-    const price = option.dataset.price || 0;
+    const price = toFiniteNumber(option?.dataset?.price, 0);
     const row = select.closest('tr');
+    if (!row) return;
     row.querySelector('.item-price').value = price;
     calculateInvoiceTotal();
 };
@@ -738,7 +858,7 @@ function calculateInvoiceTotal() {
         const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
         const price = parseFloat(row.querySelector('.item-price').value) || 0;
         const option = row.querySelector('.item-select')?.selectedOptions?.[0];
-        const gstRate = parseFloat(option?.dataset?.gst || businessSettings.gstRate || 0) || 0;
+        const gstRate = resolveGstRate(option?.dataset?.gst, businessSettings.gstRate);
         const finalRate = price + (price * gstRate / 100);
         const rowTotal = qty * finalRate;
         row.querySelector('.item-total').textContent = `₹${rowTotal.toFixed(2)}`;
@@ -782,6 +902,25 @@ function getPreviewInvoiceNumber() {
 function getSelectedInvoiceLayout() {
     if (invoiceLayoutSelect?.value) return invoiceLayoutSelect.value;
     return localStorage.getItem('invoiceLayout') || 'original';
+}
+
+function toggleInvoiceTermsEditor() {
+    const enableEl = document.getElementById('invEnableCustomTerms');
+    const wrapEl = document.getElementById('invCustomTermsWrap');
+    const textEl = document.getElementById('invCustomTermsText');
+    const enabled = Boolean(enableEl?.checked);
+    if (wrapEl) wrapEl.classList.toggle('d-none', !enabled);
+    if (textEl) textEl.disabled = !enabled;
+}
+
+function getDefaultInvoiceTermsText() {
+    return [
+        '1. Goods once sold will not be taken back.',
+        '2. Payment due within 7 days from invoice date unless otherwise agreed.',
+        '3. Interest @18% p.a. may be charged on overdue balances.',
+        '4. Any shortage/damage must be reported at the time of delivery.',
+        '5. Subject to local jurisdiction only.'
+    ].join('\n');
 }
 
 function getCopyLabelDisplay(value) {
@@ -991,6 +1130,8 @@ function renderInvoiceTemplateThumbs(company) {
 
 function getInvoiceTemplateOptionsFromForm() {
     const showGstinEl = document.getElementById('invShowGstin');
+    const customTermsEnabledEl = document.getElementById('invEnableCustomTerms');
+    const customTermsTextEl = document.getElementById('invCustomTermsText');
     const sizeToken = (document.getElementById('invFontScale')?.value || 'medium').toLowerCase();
     const sizeMap = {
         xxlarge: 130,
@@ -1006,6 +1147,8 @@ function getInvoiceTemplateOptionsFromForm() {
         businessNameOverride: (document.getElementById('invBusinessNameOverride')?.value || '').trim(),
         businessAddressOverride: (document.getElementById('invBusinessAddressOverride')?.value || '').trim(),
         showGstin: showGstinEl ? Boolean(showGstinEl.checked) : true,
+        customTermsEnabled: customTermsEnabledEl ? Boolean(customTermsEnabledEl.checked) : false,
+        customTermsText: customTermsTextEl ? String(customTermsTextEl.value || '').trim() : '',
         fontFamily: document.getElementById('invFontFamily')?.value || 'Arial, Helvetica, sans-serif',
         fontScale
     };
@@ -1062,7 +1205,7 @@ function buildInvoicePreviewData(company) {
         const option = select.selectedOptions[0];
         const qty = parseFloat(row.querySelector('.item-qty')?.value || '0') || 0;
         const price = parseFloat(row.querySelector('.item-price')?.value || '0') || 0;
-        const gstRate = parseFloat(option?.dataset?.gst || businessSettings.gstRate || 0) || 0;
+        const gstRate = resolveGstRate(option?.dataset?.gst, businessSettings.gstRate);
         const hsn = option?.dataset?.hsn || '';
         const name = option?.text?.split(' (')[0] || 'Item';
         items.push({ name, quantity: qty, price, gstRate, hsn });
@@ -1411,6 +1554,7 @@ async function loadInvoices() {
 
         snapshotDocs.forEach(doc => {
             const inv = doc.data();
+            const displayAmount = getInvoiceAmount(inv);
             invoicesData.push({ id: doc.id, ...inv });
             const escape = (str) => (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, '\\n').replace(/\r/g, '');
             const canDelete = user.permissions ? user.permissions.canDelete : true;
@@ -1451,14 +1595,14 @@ async function loadInvoices() {
                     <td>${formatDate(inv.date)}</td>
                     <td>${displayNo}</td>
                     <td>${inv.customer}</td>
-                    <td class="text-end">&#8377;${(inv.amount || 0).toLocaleString()}</td>
+                    <td class="text-end">&#8377;${displayAmount.toLocaleString()}</td>
                     <td class="invoice-actions">
                         <div class="invoice-action-row d-flex flex-wrap align-items-center gap-1">
                         ${baseLayoutSelect}
                         ${estimateCopySelect}
                         <span class="small text-muted d-none invoice-row-status" id="invDownload_${doc.id}"></span>
-                        <button class="btn btn-sm btn-outline-dark" onclick="window.printInvoiceFromList('${doc.id}', '${escape(inv.customer)}', ${inv.amount}, '${formatDate(inv.date)}')" title="Print"><i class="fas fa-print"></i></button>
-                        <button class="btn btn-sm btn-outline-primary btn-download-pdf" onclick="window.downloadInvoicePdfFromList('${doc.id}', '${escape(inv.customer)}', ${inv.amount}, '${formatDate(inv.date)}', this)" title="Download PDF"><i class="fas fa-file-pdf text-danger"></i></button>
+                        <button class="btn btn-sm btn-outline-dark" onclick="window.printInvoiceFromList('${doc.id}', '${escape(inv.customer)}', ${displayAmount}, '${formatDate(inv.date)}')" title="Print"><i class="fas fa-print"></i></button>
+                        <button class="btn btn-sm btn-outline-primary btn-download-pdf" onclick="window.downloadInvoicePdfFromList('${doc.id}', '${escape(inv.customer)}', ${displayAmount}, '${formatDate(inv.date)}', this)" title="Download PDF"><i class="fas fa-file-pdf text-danger"></i></button>
                         ${canDelete ? `<button class="btn btn-sm btn-outline-danger" onclick="window.deleteInvoice('${doc.id}')"><i class="fas fa-trash"></i></button>` : ''}
                         </div>
                     </td>
@@ -1471,7 +1615,7 @@ async function loadInvoices() {
                     <td>${formatDate(inv.date)}</td>
                     <td>${displayNo}</td>
                     <td>${inv.customer}</td>
-                    <td>&#8377;${(inv.amount || 0).toLocaleString()}</td>
+                    <td>&#8377;${displayAmount.toLocaleString()}</td>
                     <td><span class="badge bg-${statusClass}">${inv.status}</span></td>
                     <td class="invoice-actions">
                         <div class="invoice-action-row d-flex flex-wrap align-items-center gap-1">
@@ -1479,8 +1623,8 @@ async function loadInvoices() {
                         ${invoiceCopySelect}
                         <span class="small text-muted d-none invoice-row-status" id="invDownload_${doc.id}"></span>
                         <button class="btn btn-sm btn-outline-info" onclick="window.openPaymentHistory('${doc.id}')" title="Record Payment"><i class="fas fa-money-bill-wave"></i></button>
-                        <button class="btn btn-sm btn-outline-dark" onclick="window.printInvoiceFromList('${doc.id}', '${escape(inv.customer)}', ${inv.amount}, '${formatDate(inv.date)}')" title="Print"><i class="fas fa-print"></i></button>
-                        <button class="btn btn-sm btn-outline-primary btn-download-pdf" onclick="window.downloadInvoicePdfFromList('${doc.id}', '${escape(inv.customer)}', ${inv.amount}, '${formatDate(inv.date)}', this)" title="Download PDF"><i class="fas fa-file-pdf text-danger"></i></button>
+                        <button class="btn btn-sm btn-outline-dark" onclick="window.printInvoiceFromList('${doc.id}', '${escape(inv.customer)}', ${displayAmount}, '${formatDate(inv.date)}')" title="Print"><i class="fas fa-print"></i></button>
+                        <button class="btn btn-sm btn-outline-primary btn-download-pdf" onclick="window.downloadInvoicePdfFromList('${doc.id}', '${escape(inv.customer)}', ${displayAmount}, '${formatDate(inv.date)}', this)" title="Download PDF"><i class="fas fa-file-pdf text-danger"></i></button>
                         ${canDelete ? `<button class="btn btn-sm btn-outline-danger" onclick="window.deleteInvoice('${doc.id}')"><i class="fas fa-trash"></i></button>` : ''}
                         </div>
                     </td>
@@ -1568,7 +1712,7 @@ function getInvoicesExportRows() {
         inv.invoiceNo || `#${String(inv.id || '').substr(0, 6).toUpperCase()}`,
         ((inv.docType || inv.type || 'Invoice') === 'Quotation') ? 'Estimate' : (inv.docType || inv.type || 'Invoice'),
         inv.customer || '',
-        inv.amount ?? 0,
+        getInvoiceAmount(inv),
         inv.status || ''
     ]));
 }
@@ -1814,7 +1958,7 @@ async function saveInvoice(options = {}) {
         if (select.value) {
             const option = select.selectedOptions[0];
             const costPrice = parseFloat(option.dataset.cost) || 0;
-            const gstRate = parseFloat(option.dataset.gst) || Number(businessSettings.gstRate || 0);
+            const gstRate = resolveGstRate(option?.dataset?.gst, businessSettings.gstRate);
             const hsn = option.dataset.hsn || '';
             const qty = parseFloat(row.querySelector('.item-qty').value);
             
@@ -1894,6 +2038,8 @@ async function saveInvoice(options = {}) {
             customerTaxId,
             shipTo,
             amount: amount,
+            totalAmount: amount,
+            grandTotal: amount,
             amountPaid: amountPaid,
             balance: balance,
             transportCost: transportCost,
@@ -3334,6 +3480,12 @@ function getInvoiceTemplate(type, data = {}) {
     const city = safeCompany.city || safeCompany.companyCity || '';
     const zip = safeCompany.zip || safeCompany.companyZip || '';
     const showGstin = templateOptions.showGstin !== false;
+    const customTermsEnabled = templateOptions.customTermsEnabled === true;
+    const customTermsTextRaw = String(templateOptions.customTermsText || '').trim();
+    const customTermsText = customTermsTextRaw
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
     const fontFamily = (templateOptions.fontFamily || 'Arial, Helvetica, sans-serif').replace(/"/g, '&quot;');
     const fontScaleRaw = Number(templateOptions.fontScale || 100);
     const fontScale = Number.isFinite(fontScaleRaw) ? Math.max(80, Math.min(130, fontScaleRaw)) : 100;
@@ -3552,6 +3704,9 @@ function getInvoiceTemplate(type, data = {}) {
         </table>`;
 
     const amountWordsHtml = `<div class="amount-words"><strong>${docTitle} Amount In Words:</strong> ${amountWords}</div>`;
+    const customTermsHtml = (customTermsEnabled && customTermsText)
+        ? `<div class="terms-box"><div class="info-title">Terms &amp; Conditions</div><div class="terms-content">${customTermsText.replace(/\n/g, '<br>')}</div></div>`
+        : '';
 
     const paymentHtml = isInvoiceDoc ? `
         <div class="payment-grid">
@@ -3737,6 +3892,8 @@ function getInvoiceTemplate(type, data = {}) {
         .summary-box { border: 1px solid #ddd; padding: 8px; margin-top: 10px; }
         .totals-right-box { width: 55%; margin-left: auto; border: 1px solid #ddd; padding: 8px; margin-top: 10px; }
         .stacked .info-box + .info-box { margin-top: 10px; }
+        .terms-box { margin-top: 10px; border: 1px solid #ddd; padding: 8px; font-size: 12px; }
+        .terms-content { white-space: normal; line-height: 1.45; color: #333; }
     </style>
 </head>
 <body>
@@ -3749,6 +3906,7 @@ function getInvoiceTemplate(type, data = {}) {
         ${itemsTableHtml}
         ${totalsHtml}
         ${amountWordsHtml}
+        ${customTermsHtml}
         ${paymentHtml}
         <div class="invoice-footer-note">Thank you for your business!</div>
     </div>
