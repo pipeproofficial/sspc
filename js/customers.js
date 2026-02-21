@@ -1,5 +1,6 @@
 import { db } from './firebase-config.js';
 import { checkAuth, formatDate, downloadCSV, downloadPDF } from './dashboard.js';
+import { initializeStateDistrictPair, setStateDistrictValues } from './location-data.js';
 
 // DOM Elements
 const customersTable = document.getElementById('customersTable');
@@ -404,6 +405,7 @@ function getAddressContainer(kind) {
 
 function buildAddressRow(address = {}, kind = 'bill') {
     const labelRaw = (address.label || (kind === 'ship' ? 'Site' : 'Office')).toString();
+    const labelId = `addr-labels-${kind}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const label = labelRaw.replace(/"/g, '&quot;');
     const line = (address.address || '').replace(/"/g, '&quot;');
     const state = (address.state || '').replace(/"/g, '&quot;');
@@ -412,7 +414,6 @@ function buildAddressRow(address = {}, kind = 'bill') {
     const village = (address.village || '').replace(/"/g, '&quot;');
     const zip = (address.zip || '').replace(/"/g, '&quot;');
     const isDefault = Boolean(address.isDefault);
-    const labelOptions = ADDRESS_LABELS.map(v => `<option value="${v}" ${v === labelRaw ? 'selected' : ''}>${v}</option>`).join('');
     const radioName = kind === 'ship' ? 'defaultShipAddress' : 'defaultBillAddress';
     return `
         <div class="card border address-row-card">
@@ -420,9 +421,10 @@ function buildAddressRow(address = {}, kind = 'bill') {
                 <div class="row g-2 align-items-end">
                     <div class="col-md-2">
                         <label class="form-label small mb-1">Label</label>
-                        <select class="form-select form-select-sm address-label">
-                            ${labelOptions}
-                        </select>
+                        <input type="text" class="form-control form-control-sm address-label" value="${label}" placeholder="Label" list="${labelId}">
+                        <datalist id="${labelId}">
+                            ${ADDRESS_LABELS.map(v => `<option value="${v}"></option>`).join('')}
+                        </datalist>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label small mb-1">Address</label>
@@ -430,11 +432,15 @@ function buildAddressRow(address = {}, kind = 'bill') {
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small mb-1">State</label>
-                        <input type="text" class="form-control form-control-sm address-state" value="${state}" placeholder="State">
+                        <select class="form-select form-select-sm address-state" data-initial-value="${state}">
+                            <option value="">Select State</option>
+                        </select>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small mb-1">District</label>
-                        <input type="text" class="form-control form-control-sm address-district" value="${district}" placeholder="District">
+                        <select class="form-select form-select-sm address-district" data-initial-value="${district}">
+                            <option value="">Select District</option>
+                        </select>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small mb-1">Pincode</label>
@@ -471,6 +477,26 @@ function addAddressRow(kind = 'bill', address = {}) {
     const hasRows = Boolean(container.querySelector('.address-row-card'));
     const withDefault = { ...address, isDefault: address.isDefault ?? !hasRows };
     container.insertAdjacentHTML('beforeend', buildAddressRow(withDefault, kind));
+    const row = container.lastElementChild;
+    if (row) {
+        const stateEl = row.querySelector('.address-state');
+        const districtEl = row.querySelector('.address-district');
+        if (stateEl && districtEl) {
+            initializeStateDistrictPair(stateEl, districtEl, {
+                statePlaceholder: 'Select State',
+                districtPlaceholder: 'Select District'
+            }).then(async () => {
+                const stateVal = stateEl.dataset.initialValue || '';
+                const districtVal = districtEl.dataset.initialValue || '';
+                await setStateDistrictValues(stateEl, districtEl, stateVal, districtVal, {
+                    statePlaceholder: 'Select State',
+                    districtPlaceholder: 'Select District'
+                });
+            }).catch((error) => {
+                console.warn('Failed to initialize address state/district dropdowns', error);
+            });
+        }
+    }
 }
 
 function collectAddresses(kind = 'bill') {
